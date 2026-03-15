@@ -8,8 +8,8 @@
 """
 AgentML Training Script
 
-Current experiment: Random Forest baseline
-Notes: Initial default setup with Random Forest and default hyperparameters.
+Current experiment: SVC with RBF kernel
+Notes: SVC with RBF kernel, C=10, gamma=scale. SVMs often work well on small datasets.
 """
 
 import os
@@ -20,7 +20,7 @@ import pickle
 import numpy as np
 import mlflow
 import mlflow.sklearn
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.svm import SVC, SVR
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import (
     f1_score, accuracy_score, mean_squared_error, r2_score,
@@ -40,22 +40,17 @@ def get_model(task_type):
     The agent modifies this function to try different models and hyperparameters.
     """
     if task_type == "classification":
-        model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=None,
-            min_samples_split=2,
-            min_samples_leaf=1,
+        model = SVC(
+            kernel="rbf",
+            C=10.0,
+            gamma="scale",
             random_state=42,
-            n_jobs=-1,
         )
     else:
-        model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=None,
-            min_samples_split=2,
-            min_samples_leaf=1,
-            random_state=42,
-            n_jobs=-1,
+        model = SVR(
+            kernel="rbf",
+            C=10.0,
+            gamma="scale",
         )
     return model
 
@@ -152,7 +147,7 @@ def train():
         mlflow.log_metric("cv_folds", cv_folds)
 
         # Log the agent's notes about why this change was made
-        notes = "Initial baseline: Random Forest with default hyperparameters"
+        notes = "SVC with RBF kernel, C=10, gamma=scale"
         mlflow.log_param("agent_notes", notes)
 
         # Log model artifact
