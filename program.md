@@ -1,7 +1,7 @@
 ---
 dataset:
-  path: data/dataset.csv
-  target_column: target
+  path: data/iris.csv
+  target_column: species
   task_type: auto                    # classification | regression | auto
 
 metric:
