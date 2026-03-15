@@ -1,0 +1,11 @@
+mlruns/
+processed/*.pkl
+data/*.csv
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+best_scores.json
+.ipynb_checkpoints/
