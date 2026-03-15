@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python prepare.py)",
+      "Bash(.venv/Scripts/python run_experiment.py)",
+      "Bash(.venv/Scripts/python select_model.py --list)"
+    ]
+  }
+}
