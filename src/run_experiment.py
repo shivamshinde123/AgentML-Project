@@ -7,7 +7,6 @@ train.py, logs to MLflow, tracks best models, and handles git commit/revert.
 Usage:
     python run_experiment.py
     python run_experiment.py --force-prepare
-    python run_experiment.py --use-alt-prepare
 """
 
 import os
@@ -17,12 +16,18 @@ import subprocess
 import argparse
 from datetime import datetime
 
+# Resolve project root (one level up from src/)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+
 import yaml
 import mlflow
 from mlflow.tracking import MlflowClient
 
 
-def parse_program_md(path="program.md"):
+def parse_program_md(path=None):
+    if path is None:
+        path = os.path.join(PROJECT_ROOT, "program.md")
     """Parse YAML frontmatter from program.md."""
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -36,7 +41,9 @@ def parse_program_md(path="program.md"):
     return config, instructions
 
 
-def load_best_scores(path="best_scores.json"):
+def load_best_scores(path=None):
+    if path is None:
+        path = os.path.join(PROJECT_ROOT, "best_scores.json")
     """Load the best scores tracking file."""
     if os.path.exists(path):
         with open(path, "r") as f:
@@ -51,22 +58,24 @@ def load_best_scores(path="best_scores.json"):
     }
 
 
-def save_best_scores(scores, path="best_scores.json"):
+def save_best_scores(scores, path=None):
+    if path is None:
+        path = os.path.join(PROJECT_ROOT, "best_scores.json")
     """Save the best scores tracking file."""
     with open(path, "w") as f:
         json.dump(scores, f, indent=2)
 
 
-def run_prepare(config, force=False, use_alt=False):
+def run_prepare(config, force=False):
     """Run the preprocessing pipeline."""
-    processed_path = "processed/data_splits.pkl"
+    processed_path = os.path.join(PROJECT_ROOT, "processed", "data_splits.pkl")
 
     if os.path.exists(processed_path) and not force:
         print("[orchestrator] Processed data already exists, skipping preprocessing.")
         print("               Use --force-prepare to re-run preprocessing.")
         return True
 
-    script = "prepare_if_only_when_required.py" if use_alt else "prepare.py"
+    script = os.path.join(SRC_DIR, "prepare.py")
     print(f"[orchestrator] Running preprocessing: {script}")
 
     result = subprocess.run(
@@ -90,7 +99,7 @@ def run_train(tracking_uri, run_id, experiment_name):
     env["MLFLOW_EXPERIMENT_NAME"] = experiment_name
 
     result = subprocess.run(
-        [sys.executable, "train.py"],
+        [sys.executable, os.path.join(SRC_DIR, "train.py")],
         capture_output=True, text=True, env=env,
     )
 
@@ -125,7 +134,7 @@ def git_commit_train(model_name, val_score, metric_name, notes=""):
             return False
 
         # Stage train.py
-        subprocess.run(["git", "add", "train.py"], capture_output=True, text=True)
+        subprocess.run(["git", "add", "src/train.py"], capture_output=True, text=True)
 
         # Check if there are changes to commit
         diff = subprocess.run(
@@ -159,7 +168,7 @@ def git_revert_train():
     """Revert train.py to the last committed version."""
     try:
         result = subprocess.run(
-            ["git", "checkout", "--", "train.py"],
+            ["git", "checkout", "--", "src/train.py"],
             capture_output=True, text=True,
         )
         if result.returncode == 0:
@@ -264,8 +273,7 @@ def print_summary(scores, train_result, improved):
     print(f"  No-improvement streak: {scores['consecutive_no_improvement']}")
     if scores["consecutive_no_improvement"] >= 3:
         print("  WARNING: 3+ consecutive experiments without improvement.")
-        print("           Consider switching to prepare_if_only_when_required.py")
-        print("           by changing scaler in program.md.")
+        print("           Consider changing imputer, encoder, or scaler in program.md.")
     print("=" * 60)
 
 
@@ -273,8 +281,6 @@ def main():
     parser = argparse.ArgumentParser(description="AgentML Experiment Orchestrator")
     parser.add_argument("--force-prepare", action="store_true",
                         help="Re-run preprocessing even if splits exist")
-    parser.add_argument("--use-alt-prepare", action="store_true",
-                        help="Use prepare_if_only_when_required.py")
     parser.add_argument("--experiment-name", type=str, default=None,
                         help="Override MLflow experiment name")
     args = parser.parse_args()
@@ -282,25 +288,27 @@ def main():
     # Parse config
     config, instructions = parse_program_md()
     mlflow_config = config.get("mlflow", {})
-    tracking_uri = mlflow_config.get("tracking_uri", "./mlruns")
+    raw_tracking_uri = mlflow_config.get("tracking_uri", "./mlruns")
+    # Resolve relative tracking URIs against project root and use file: URI for MLflow
+    if raw_tracking_uri.startswith(("http://", "https://", "databricks", "sqlite", "postgresql", "mysql", "mssql")):
+        tracking_uri = raw_tracking_uri
+    else:
+        resolved = os.path.normpath(os.path.join(PROJECT_ROOT, raw_tracking_uri))
+        tracking_uri = "file:///" + resolved.replace("\\", "/")
     experiment_name = args.experiment_name or mlflow_config.get(
         "experiment_name", "agentml_experiment"
     )
     top_n = mlflow_config.get("top_n_models", 5)
 
-    # Determine if alt prepare should be used
-    scaler_type = config.get("preprocessing", {}).get("scaler", "standard")
-    use_alt = args.use_alt_prepare or scaler_type != "standard"
-
     print("=" * 60)
     print("AgentML Experiment Orchestrator")
     print(f"  Experiment: {experiment_name}")
     print(f"  Tracking URI: {tracking_uri}")
-    print(f"  Prepare script: {'prepare_if_only_when_required.py' if use_alt else 'prepare.py'}")
+    print(f"  Prepare script: src/prepare.py")
     print("=" * 60)
 
     # Step 1: Run preprocessing
-    if not run_prepare(config, force=args.force_prepare, use_alt=use_alt):
+    if not run_prepare(config, force=args.force_prepare):
         print("[orchestrator] Preprocessing failed, aborting.")
         sys.exit(1)
 
@@ -336,6 +344,7 @@ def main():
         "model_name": model_name,
         "val_score": val_score,
         "cv_mean": train_result["cv_mean"],
+        "all_metrics": train_result.get("all_metrics", {}),
         "timestamp": datetime.now().isoformat(),
     })
 
@@ -345,6 +354,7 @@ def main():
         scores["best_val_score"] = val_score
         scores["best_run_id"] = train_result["run_id"]
         scores["best_model_name"] = model_name
+        scores["best_metrics"] = train_result.get("all_metrics", {})
         scores["consecutive_no_improvement"] = 0
     else:
         scores["consecutive_no_improvement"] += 1

@@ -1,14 +1,16 @@
 ---
 dataset:
-  path: data/dataset.csv
-  target_column: label_feature_name
+  path: data/house_prices.csv
+  target_column: Price (in rupees)
   task_type: auto                    # classification | regression | auto
 
 metric:
   primary: auto                      # auto | f1_weighted | rmse | accuracy | r2 | neg_mean_squared_error
 
 preprocessing:
-  skip_steps: []                     # options: duplicates, imputation, encoding, normalization, smote, feature_selection
+  skip_steps: []                     # options: feature_selection (critical steps like duplicates, imputation, encoding, normalization, smote cannot be skipped)
+  imputer: median                    # median | mean | knn | iterative
+  encoder: label_onehot              # label_onehot | ordinal | target
   scaler: standard                   # standard | minmax | robust | maxabs
 
 mlflow:

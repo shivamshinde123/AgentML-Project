@@ -1,11 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.venv/Scripts/python prepare.py)",
-      "Bash(.venv/Scripts/python run_experiment.py)",
-      "Bash(.venv/Scripts/python select_model.py --list)",
+      "Bash(.venv/Scripts/python src/prepare.py)",
+      "Bash(.venv/Scripts/python src/run_experiment.py)",
+      "Bash(.venv/Scripts/python src/select_model.py --list)",
+      "Bash(python src/run_experiment.py)",
       "Bash(python run_experiment.py)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(python -c \":*)",
+      "Bash(uv add:*)",
+      "Bash(python -c \"import xgboost; print\\(xgboost.__version__\\)\")",
+      "Bash(pip install:*)"
     ]
   }
 }

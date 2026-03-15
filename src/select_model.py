@@ -9,14 +9,20 @@ Usage:
     python select_model.py --rank 1 --experiment-name my_exp  # Specify experiment
 """
 
+import os
 import argparse
 import yaml
 
 import mlflow
+
+# Resolve project root (one level up from src/)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from mlflow.tracking import MlflowClient
 
 
-def parse_program_md(path="program.md"):
+def parse_program_md(path=None):
+    if path is None:
+        path = os.path.join(PROJECT_ROOT, "program.md")
     """Parse YAML frontmatter from program.md."""
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -159,7 +165,12 @@ def main():
     # Get config
     config = parse_program_md()
     mlflow_config = config.get("mlflow", {})
-    tracking_uri = args.tracking_uri or mlflow_config.get("tracking_uri", "./mlruns")
+    raw_tracking_uri = args.tracking_uri or mlflow_config.get("tracking_uri", "./mlruns")
+    if raw_tracking_uri.startswith(("http://", "https://", "databricks", "sqlite", "postgresql", "mysql", "mssql")):
+        tracking_uri = raw_tracking_uri
+    else:
+        resolved = os.path.normpath(os.path.join(PROJECT_ROOT, raw_tracking_uri))
+        tracking_uri = "file:///" + resolved.replace("\\", "/")
     experiment_name = args.experiment_name or mlflow_config.get(
         "experiment_name", "agentml_experiment"
     )
