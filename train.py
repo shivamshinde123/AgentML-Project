@@ -8,24 +8,22 @@
 """
 AgentML Training Script
 
-Current experiment: HistGradientBoostingRegressor tuned v1
-Notes: Increase max_iter=500, lower lr=0.05, max_depth=8 for better generalization.
+Current experiment: HistGradientBoostingRegressor baseline
+Notes: Baseline with clean preprocessed data from prepare_if_only_when_required.py.
+       No preprocessing needed here - data is fully numeric and NaN-free.
 """
 
 import os
-import sys
 import json
 import time
 import pickle
-import re
 import numpy as np
-import pandas as pd
 import mlflow
 import mlflow.sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import (
-    f1_score, accuracy_score, mean_squared_error, r2_score,
+    f1_score, mean_squared_error,
 )
 
 
@@ -34,137 +32,6 @@ def load_data(path="processed/data_splits.pkl"):
     with open(path, "rb") as f:
         data = pickle.load(f)
     return data
-
-
-def parse_amount(val):
-    """Parse 'Amount(in rupees)' like '75.9 Lac' or '1.2 Cr' to numeric."""
-    if isinstance(val, (int, float)):
-        return float(val)
-    s = str(val).strip().lower()
-    try:
-        num = float(re.findall(r'[\d.]+', s)[0])
-    except (IndexError, ValueError):
-        return np.nan
-    if 'cr' in s:
-        return num * 1e7
-    elif 'lac' in s or 'lakh' in s:
-        return num * 1e5
-    return num
-
-
-def parse_area(val):
-    """Parse area strings like '1390 sqft' to numeric."""
-    if isinstance(val, (int, float)):
-        return float(val)
-    s = str(val).strip().lower()
-    try:
-        return float(re.findall(r'[\d.]+', s)[0])
-    except (IndexError, ValueError):
-        return np.nan
-
-
-def parse_floor(val):
-    """Parse '4 out of 4' -> (current_floor, total_floors)."""
-    s = str(val).strip().lower()
-    match = re.findall(r'(\d+)\s*out\s*of\s*(\d+)', s)
-    if match:
-        return float(match[0][0]), float(match[0][1])
-    nums = re.findall(r'\d+', s)
-    if nums:
-        return float(nums[0]), np.nan
-    return np.nan, np.nan
-
-
-def parse_car_parking(val):
-    """Parse '1 Covered' or '2 Open' -> count."""
-    if isinstance(val, (int, float)):
-        return float(val)
-    s = str(val).strip()
-    nums = re.findall(r'\d+', s)
-    if nums:
-        return float(nums[0])
-    return np.nan
-
-
-def parse_simple_numeric(val):
-    """Try to parse a simple numeric value from string."""
-    if isinstance(val, (int, float)):
-        return float(val)
-    s = str(val).strip()
-    try:
-        return float(s)
-    except ValueError:
-        nums = re.findall(r'[\d.]+', s)
-        if nums:
-            return float(nums[0])
-        return np.nan
-
-
-# Store fitted label encoders for consistent encoding across train/val
-_label_encoders = {}
-
-
-def engineer_features(X_raw, feature_names, fit=True):
-    """Transform raw object array into engineered numeric DataFrame."""
-    global _label_encoders
-    from sklearn.preprocessing import LabelEncoder
-
-    df = pd.DataFrame(X_raw, columns=feature_names)
-    features = {}
-
-    # Numeric features - parse from strings
-    if 'Index' in df.columns:
-        features['Index'] = pd.to_numeric(df['Index'], errors='coerce')
-    if 'Amount(in rupees)' in df.columns:
-        features['Amount'] = df['Amount(in rupees)'].apply(parse_amount)
-    if 'Carpet Area' in df.columns:
-        features['CarpetArea'] = df['Carpet Area'].apply(parse_area)
-    if 'Floor' in df.columns:
-        floor_parsed = df['Floor'].apply(parse_floor)
-        features['CurrentFloor'] = floor_parsed.apply(lambda x: x[0])
-        features['TotalFloors'] = floor_parsed.apply(lambda x: x[1])
-    if 'Bathroom' in df.columns:
-        features['Bathroom'] = df['Bathroom'].apply(parse_simple_numeric)
-    if 'Balcony' in df.columns:
-        features['Balcony'] = df['Balcony'].apply(parse_simple_numeric)
-    if 'Car Parking' in df.columns:
-        features['CarParking'] = df['Car Parking'].apply(parse_car_parking)
-    if 'Super Area' in df.columns:
-        features['SuperArea'] = df['Super Area'].apply(parse_area)
-    if 'Dimensions' in df.columns:
-        features['Dimensions'] = pd.to_numeric(df['Dimensions'], errors='coerce')
-    if 'Plot Area' in df.columns:
-        features['PlotArea'] = pd.to_numeric(df['Plot Area'], errors='coerce')
-    if 'Title' in df.columns:
-        features['BHK'] = df['Title'].astype(str).str.extract(
-            r'(\d+)\s*BHK', expand=False
-        ).astype(float)
-
-    # Label encode categoricals with consistent encoding
-    cat_cols = ['location', 'Status', 'Transaction', 'Furnishing', 'facing',
-                'overlooking', 'Society', 'Ownership']
-    for col in cat_cols:
-        if col not in df.columns:
-            continue
-        enc_name = f'{col}_enc'
-        if fit:
-            le = LabelEncoder()
-            le.fit(df[col].astype(str))
-            _label_encoders[col] = le
-        else:
-            le = _label_encoders.get(col)
-            if le is None:
-                le = LabelEncoder()
-                le.fit(df[col].astype(str))
-
-        known = set(le.classes_)
-        col_vals = df[col].astype(str).apply(
-            lambda x, k=known, c=le.classes_: x if x in k else c[0]
-        )
-        features[enc_name] = le.transform(col_vals)
-
-    result = pd.DataFrame(features)
-    return result.values.astype(np.float64)
 
 
 def get_model(task_type):
@@ -182,12 +49,11 @@ def get_model(task_type):
         )
     else:
         model = HistGradientBoostingRegressor(
-            max_iter=4000,
-            learning_rate=0.01,
-            max_depth=5,
-            min_samples_leaf=25,
-            l2_regularization=0.5,
-            max_bins=255,
+            max_iter=500,
+            learning_rate=0.05,
+            max_depth=6,
+            min_samples_leaf=20,
+            l2_regularization=0.1,
             random_state=42,
         )
     return model
@@ -223,22 +89,12 @@ def train():
     task_type = metadata["task_type"]
     metric_name = metadata.get("metric", "auto")
     cv_folds = metadata.get("cv_folds", 10)
-    feature_names = data.get("feature_names",
-                             [f"col_{i}" for i in range(data["X_train"].shape[1])])
 
-    # Engineer features
-    X_train = engineer_features(data["X_train"], feature_names, fit=True)
+    # Data is already fully preprocessed - just load and use directly
+    X_train = np.array(data["X_train"], dtype=np.float64)
     y_train = np.array(data["y_train"], dtype=np.float64)
-    X_val = engineer_features(data["X_val"], feature_names, fit=False)
+    X_val = np.array(data["X_val"], dtype=np.float64)
     y_val = np.array(data["y_val"], dtype=np.float64)
-
-    # Remove rows with NaN target
-    train_mask = ~np.isnan(y_train)
-    val_mask = ~np.isnan(y_val)
-    X_train = X_train[train_mask]
-    y_train = y_train[train_mask]
-    X_val = X_val[val_mask]
-    y_val = y_val[val_mask]
 
     model = get_model(task_type)
     scoring = get_scoring(task_type, metric_name)
@@ -286,7 +142,7 @@ def train():
         mlflow.log_metric("training_time", float(total_time))
         mlflow.log_metric("cv_folds", cv_folds)
 
-        notes = "HGBR v8: max_iter=4000, lr=0.01, max_depth=5, min_samples_leaf=25, l2_reg=0.5."
+        notes = "HGBR baseline: max_iter=500, lr=0.05, depth=6, min_leaf=20, l2=0.1"
         mlflow.log_param("agent_notes", notes)
         mlflow.sklearn.log_model(model, "model")
 
