@@ -9,7 +9,7 @@
 AgentML Training Script
 
 Current experiment: HistGradientBoostingRegressor baseline
-Notes: Baseline with clean preprocessed data from prepare_if_only_when_required.py.
+Notes: Baseline with clean preprocessed data from prepare.py.
        No preprocessing needed here - data is fully numeric and NaN-free.
 """
 
@@ -23,7 +23,8 @@ import mlflow.sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import (
-    f1_score, mean_squared_error,
+    f1_score, accuracy_score, precision_score, recall_score,
+    mean_squared_error, mean_absolute_error, r2_score,
 )
 
 
@@ -69,17 +70,49 @@ def get_scoring(task_type, metric=None):
         return "neg_root_mean_squared_error"
 
 
-def evaluate_model(model, X_val, y_val, task_type):
-    """Evaluate the trained model on the validation set."""
+def evaluate_model(model, X_val, y_val, task_type, metric_name="auto"):
+    """
+    Evaluate the trained model on the validation set.
+    Returns (primary_score, all_metrics_dict).
+    Primary score matches the configured metric for fair comparison.
+    All metrics are logged to MLflow for full visibility.
+    """
     y_pred = model.predict(X_val)
 
     if task_type == "classification":
-        val_score = f1_score(y_val, y_pred, average="weighted")
+        metrics = {
+            "val_f1_weighted": f1_score(y_val, y_pred, average="weighted"),
+            "val_accuracy": accuracy_score(y_val, y_pred),
+            "val_precision_weighted": precision_score(y_val, y_pred, average="weighted", zero_division=0),
+            "val_recall_weighted": recall_score(y_val, y_pred, average="weighted", zero_division=0),
+        }
+        # Map configured metric to the corresponding computed value
+        metric_map = {
+            "f1_weighted": metrics["val_f1_weighted"],
+            "accuracy": metrics["val_accuracy"],
+        }
+        val_score = metric_map.get(metric_name, metrics["val_f1_weighted"])
     else:
+        n = len(y_val)
+        p = X_val.shape[1]
         rmse = np.sqrt(mean_squared_error(y_val, y_pred))
-        val_score = -rmse
+        mae = mean_absolute_error(y_val, y_pred)
+        r2 = r2_score(y_val, y_pred)
+        r2_adj = 1 - (1 - r2) * (n - 1) / (n - p - 1) if n > p + 1 else r2
+        metrics = {
+            "val_rmse": rmse,
+            "val_mae": mae,
+            "val_r2_adjusted": r2_adj,
+        }
+        # Map configured metric to the corresponding computed value
+        metric_map = {
+            "neg_root_mean_squared_error": -rmse,
+            "neg_mean_squared_error": -mean_squared_error(y_val, y_pred),
+            "r2_adjusted": r2_adj,
+        }
+        val_score = metric_map.get(metric_name, -rmse)
 
-    return val_score
+    return val_score, metrics
 
 
 def train():
@@ -126,7 +159,9 @@ def train():
         train_time = time.time() - train_start
 
         total_time = cv_time + train_time
-        val_score = evaluate_model(model, X_val, y_val, task_type)
+        val_score, all_metrics = evaluate_model(
+            model, X_val, y_val, task_type, metric_name
+        )
 
         mlflow.log_param("model_name", model_name)
         model_params = model.get_params()
@@ -142,6 +177,10 @@ def train():
         mlflow.log_metric("training_time", float(total_time))
         mlflow.log_metric("cv_folds", cv_folds)
 
+        # Log all evaluation metrics for full visibility
+        for metric_key, metric_val in all_metrics.items():
+            mlflow.log_metric(metric_key, float(metric_val))
+
         notes = "HGBR baseline: max_iter=500, lr=0.05, depth=6, min_leaf=20, l2=0.1"
         mlflow.log_param("agent_notes", notes)
         mlflow.sklearn.log_model(model, "model")
@@ -155,6 +194,7 @@ def train():
             "val_score": float(val_score),
             "training_time": float(total_time),
             "notes": notes,
+            "all_metrics": {k: float(v) for k, v in all_metrics.items()},
         }
         print(json.dumps(result))
 
