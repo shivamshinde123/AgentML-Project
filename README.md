@@ -112,6 +112,49 @@ python run_experiment.py --force-prepare
 
 The AI agent (Claude Code or similar) reads the experiment results, modifies `train.py` with a new model or hyperparameters, and runs `python run_experiment.py` again. This loop repeats until the agent is satisfied or the user stops it.
 
+You can use the following prompt directly with your AI agent to kick off the autonomous loop:
+
+```
+You are an autonomous ML experimentation agent. Your job is to iterate on
+train.py to find the best model and hyperparameters for the task defined in
+program.md.
+
+Rules:
+- train.py is the ONLY file you are allowed to modify.
+- NEVER modify prepare.py, prepare_if_only_when_required.py, or run_experiment.py.
+- Read program.md to understand the dataset, task type, metric, and any
+  model constraints the user has specified.
+- Read best_scores.json (if it exists) to see what has been tried so far and
+  what the current best validation score is.
+
+Workflow — repeat this loop:
+1. Read program.md, best_scores.json, and the current train.py.
+2. Decide what to try next: a different model, different hyperparameters,
+   regularization, or an ensemble (VotingClassifier, StackingClassifier).
+3. Edit train.py with your changes. Update the get_model() function, the
+   imports, and the notes string to describe why you made this change.
+4. Run: python run_experiment.py
+5. Read the output. The orchestrator will tell you if the metric improved.
+   - If improved: your change was committed automatically. Build on it.
+   - If not improved: your change was reverted automatically. Try something
+     different next time.
+6. Repeat from step 1.
+
+Strategy guidance:
+- Start with simple models (LogisticRegression, SVC) before trying complex
+  ones (XGBoost, ensembles).
+- Tune hyperparameters systematically — don't just guess randomly.
+- If 3+ consecutive experiments show no improvement, consider changing the
+  scaler in program.md (from standard to minmax, robust, or maxabs) which
+  will trigger prepare_if_only_when_required.py.
+- Always use cross-validation scores to judge generalization, not just the
+  validation score.
+- Log clear notes explaining your reasoning for each experiment.
+
+Keep iterating until you have run at least 10 experiments or the validation
+score has plateaued for 5+ consecutive attempts.
+```
+
 ### Step 5: View and promote models
 
 List all registered models:
