@@ -126,6 +126,8 @@ Rules:
   model constraints the user has specified.
 - Read best_scores.json (if it exists) to see what has been tried so far and
   what the current best validation score is.
+- If you need to install any new package, use `uv add package-name`. NEVER
+  use pip.
 
 Workflow — repeat this loop:
 1. Read program.md, best_scores.json, and the current train.py.

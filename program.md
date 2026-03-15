@@ -1,7 +1,7 @@
 ---
 dataset:
   path: data/dataset.csv
-  target_column: target
+  target_column: label_feature_name
   task_type: auto                    # classification | regression | auto
 
 metric:

@@ -173,9 +173,9 @@ def git_revert_train():
         return False
 
 
-def register_model_if_improved(client, run_id, model_name, val_score,
-                                experiment_name, top_n):
-    """Register model in MLflow registry if it's in the top N."""
+def register_model_if_top_n(client, run_id, model_name, val_score,
+                            experiment_name, top_n):
+    """Register model in MLflow registry and keep only the top N versions."""
     registry_name = f"agentml-{experiment_name}"
 
     try:
@@ -184,6 +184,26 @@ def register_model_if_improved(client, run_id, model_name, val_score,
             client.create_registered_model(registry_name)
         except mlflow.exceptions.MlflowException:
             pass  # Already exists
+
+        # Get existing versions and their scores
+        existing_versions = client.search_model_versions(f"name='{registry_name}'")
+        version_scores = []
+        for v in existing_versions:
+            try:
+                run = client.get_run(v.run_id)
+                score = run.data.metrics.get("val_score", float("-inf"))
+                version_scores.append((v, score))
+            except Exception:
+                version_scores.append((v, float("-inf")))
+
+        # Check if this model qualifies for top N
+        if len(version_scores) >= top_n:
+            version_scores.sort(key=lambda x: x[1], reverse=True)
+            worst_top_n_score = version_scores[top_n - 1][1]
+            if val_score <= worst_top_n_score:
+                print(f"[orchestrator] Model score {val_score:.6f} does not "
+                      f"qualify for top {top_n}, skipping registration")
+                return False
 
         # Register this model version
         model_uri = f"runs:/{run_id}/model"
@@ -197,11 +217,10 @@ def register_model_if_improved(client, run_id, model_name, val_score,
               f"({model_name}, val_score={val_score:.6f})")
 
         # Clean up: keep only top N versions
-        versions = client.search_model_versions(f"name='{registry_name}'")
-        if len(versions) > top_n:
-            # Sort by val_score (from run metrics)
+        all_versions = client.search_model_versions(f"name='{registry_name}'")
+        if len(all_versions) > top_n:
             version_scores = []
-            for v in versions:
+            for v in all_versions:
                 try:
                     run = client.get_run(v.run_id)
                     score = run.data.metrics.get("val_score", float("-inf"))
@@ -211,7 +230,6 @@ def register_model_if_improved(client, run_id, model_name, val_score,
 
             version_scores.sort(key=lambda x: x[1], reverse=True)
 
-            # Delete versions beyond top N
             for v, score in version_scores[top_n:]:
                 try:
                     client.delete_model_version(
@@ -334,15 +352,17 @@ def main():
     # Step 5: Git commit or revert
     if improved:
         git_commit_train(model_name, val_score, metric_name, notes)
-        register_model_if_improved(
-            client, train_result["run_id"], model_name,
-            val_score, experiment_name, top_n,
-        )
     else:
         print(f"[orchestrator] No improvement "
               f"({val_score:.6f} <= {scores['best_val_score']:.6f}). "
               f"Reverting train.py.")
         git_revert_train()
+
+    # Step 5b: Register model if it's in the top N (regardless of improvement)
+    register_model_if_top_n(
+        client, train_result["run_id"], model_name,
+        val_score, experiment_name, top_n,
+    )
 
     # Step 6: Save scores and print summary
     save_best_scores(scores)
