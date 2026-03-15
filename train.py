@@ -8,9 +8,8 @@
 """
 AgentML Training Script
 
-Current experiment: HistGradientBoostingRegressor baseline
-Notes: Uses HistGradientBoostingRegressor which handles NaN natively.
-       Full feature engineering from raw data.
+Current experiment: HistGradientBoostingRegressor tuned v1
+Notes: Increase max_iter=500, lower lr=0.05, max_depth=8 for better generalization.
 """
 
 import os
@@ -183,9 +182,10 @@ def get_model(task_type):
         )
     else:
         model = HistGradientBoostingRegressor(
-            max_iter=200,
-            learning_rate=0.1,
-            max_depth=6,
+            max_iter=500,
+            learning_rate=0.05,
+            max_depth=8,
+            min_samples_leaf=20,
             random_state=42,
         )
     return model
@@ -284,7 +284,7 @@ def train():
         mlflow.log_metric("training_time", float(total_time))
         mlflow.log_metric("cv_folds", cv_folds)
 
-        notes = "HistGradientBoostingRegressor baseline: max_iter=200, lr=0.1, max_depth=6. Full feature engineering with parsed numerics and label-encoded categoricals."
+        notes = "HistGradientBoostingRegressor tuned v1: max_iter=500, lr=0.05, max_depth=8, min_samples_leaf=20. Aiming for better generalization."
         mlflow.log_param("agent_notes", notes)
         mlflow.sklearn.log_model(model, "model")
 
