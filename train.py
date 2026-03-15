@@ -182,10 +182,11 @@ def get_model(task_type):
         )
     else:
         model = HistGradientBoostingRegressor(
-            max_iter=500,
-            learning_rate=0.05,
-            max_depth=8,
-            min_samples_leaf=20,
+            max_iter=1000,
+            learning_rate=0.03,
+            max_depth=10,
+            min_samples_leaf=30,
+            l2_regularization=1.0,
             random_state=42,
         )
     return model
@@ -284,7 +285,7 @@ def train():
         mlflow.log_metric("training_time", float(total_time))
         mlflow.log_metric("cv_folds", cv_folds)
 
-        notes = "HistGradientBoostingRegressor tuned v1: max_iter=500, lr=0.05, max_depth=8, min_samples_leaf=20. Aiming for better generalization."
+        notes = "HGBR v2: max_iter=1000, lr=0.03, max_depth=10, min_samples_leaf=30, l2_reg=1.0. More iterations with regularization."
         mlflow.log_param("agent_notes", notes)
         mlflow.sklearn.log_model(model, "model")
 
