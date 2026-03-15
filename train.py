@@ -8,8 +8,8 @@
 """
 AgentML Training Script
 
-Current experiment: SVC with RBF kernel
-Notes: SVC with RBF kernel, C=10, gamma=scale. SVMs often work well on small datasets.
+Current experiment: KNN k=7
+Notes: KNeighborsClassifier with k=7, weights=distance
 """
 
 import os
@@ -20,7 +20,7 @@ import pickle
 import numpy as np
 import mlflow
 import mlflow.sklearn
-from sklearn.svm import SVC, SVR
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import (
     f1_score, accuracy_score, mean_squared_error, r2_score,
@@ -40,17 +40,16 @@ def get_model(task_type):
     The agent modifies this function to try different models and hyperparameters.
     """
     if task_type == "classification":
-        model = SVC(
-            kernel="rbf",
-            C=10.0,
-            gamma="scale",
-            random_state=42,
+        model = KNeighborsClassifier(
+            n_neighbors=7,
+            weights="distance",
+            n_jobs=-1,
         )
     else:
-        model = SVR(
-            kernel="rbf",
-            C=10.0,
-            gamma="scale",
+        model = KNeighborsRegressor(
+            n_neighbors=7,
+            weights="distance",
+            n_jobs=-1,
         )
     return model
 
@@ -73,14 +72,13 @@ def evaluate_model(model, X_val, y_val, task_type):
         val_score = f1_score(y_val, y_pred, average="weighted")
     else:
         rmse = np.sqrt(mean_squared_error(y_val, y_pred))
-        val_score = -rmse  # Negative so higher is better (consistent with sklearn)
+        val_score = -rmse
 
     return val_score
 
 
 def train():
     """Run a single training experiment."""
-    # Load data
     data = load_data()
     metadata = data["metadata"]
     task_type = metadata["task_type"]
@@ -92,12 +90,10 @@ def train():
     X_val = data["X_val"]
     y_val = data["y_val"]
 
-    # Get model and scoring
     model = get_model(task_type)
     scoring = get_scoring(task_type, metric_name)
     model_name = type(model).__name__
 
-    # Get or create MLflow run
     run_id = os.environ.get("MLFLOW_RUN_ID")
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "./mlruns")
     mlflow.set_tracking_uri(tracking_uri)
@@ -112,7 +108,6 @@ def train():
     with run_context:
         actual_run_id = mlflow.active_run().info.run_id
 
-        # Cross-validation
         start_time = time.time()
         cv_scores = cross_val_score(
             model, X_train, y_train,
@@ -120,20 +115,15 @@ def train():
         )
         cv_time = time.time() - start_time
 
-        # Train on full training set
         train_start = time.time()
         model.fit(X_train, y_train)
         train_time = time.time() - train_start
 
         total_time = cv_time + train_time
-
-        # Evaluate on validation set
         val_score = evaluate_model(model, X_val, y_val, task_type)
 
-        # Log to MLflow
         mlflow.log_param("model_name", model_name)
         model_params = model.get_params()
-        # MLflow has a param value length limit, so filter long params
         for k, v in model_params.items():
             try:
                 mlflow.log_param(k, v)
@@ -146,14 +136,10 @@ def train():
         mlflow.log_metric("training_time", float(total_time))
         mlflow.log_metric("cv_folds", cv_folds)
 
-        # Log the agent's notes about why this change was made
-        notes = "SVC with RBF kernel, C=10, gamma=scale"
+        notes = "KNeighborsClassifier with k=7, weights=distance"
         mlflow.log_param("agent_notes", notes)
-
-        # Log model artifact
         mlflow.sklearn.log_model(model, "model")
 
-        # Print JSON summary for orchestrator
         result = {
             "run_id": actual_run_id,
             "model_name": model_name,
