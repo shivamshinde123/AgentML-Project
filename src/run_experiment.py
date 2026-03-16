@@ -310,12 +310,6 @@ def print_summary(scores, train_result, improved):
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
     """Orchestrate a single experiment: preprocess → train → evaluate → commit/revert.
 
     High-level flow:
@@ -327,6 +321,11 @@ def main():
          If no improvement → revert train.py to the last committed version.
       6. Attempt to register the model in the MLflow registry (keeps top-N only).
     """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     parser = argparse.ArgumentParser(description="AgentML Experiment Orchestrator")
     parser.add_argument("--force-prepare", action="store_true",
                         help="Re-run preprocessing even if splits exist")
