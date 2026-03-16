@@ -89,7 +89,20 @@ def save_best_scores(scores, path=None):
 
 
 def run_prepare(config, force=False):
-    """Run the preprocessing pipeline."""
+    """Run the preprocessing pipeline (prepare.py) as a subprocess.
+
+    Skips execution if processed data already exists unless ``force=True``.
+
+    Args:
+        config (dict): Parsed YAML config from program.md (currently unused
+            but kept for future per-config caching logic).
+        force (bool): If True, re-run preprocessing even when
+            ``processed/data_splits.pkl`` already exists.
+
+    Returns:
+        bool: True if preprocessing succeeded (or was skipped), False if the
+            subprocess exited with a non-zero return code.
+    """
     processed_path = os.path.join(PROJECT_ROOT, "processed", "data_splits.pkl")
 
     if os.path.exists(processed_path) and not force:
@@ -151,7 +164,21 @@ def run_train(tracking_uri, run_id, experiment_name):
 
 
 def git_commit_train(model_name, val_score, metric_name, notes=""):
-    """Commit train.py changes with a descriptive message."""
+    """Stage and commit the current train.py to git with an informative message.
+
+    Only commits when there are actual staged changes to train.py.  Silently
+    returns False when git is unavailable or the working tree is not a repo.
+
+    Args:
+        model_name (str): Name of the model class used in this experiment
+            (e.g. "HistGradientBoostingRegressor").
+        val_score (float): Validation score achieved by this experiment.
+        metric_name (str): Name of the primary metric (e.g. "f1_weighted").
+        notes (str): Optional free-text notes to include in the commit body.
+
+    Returns:
+        bool: True if a commit was successfully created, False otherwise.
+    """
     try:
         # Check if git is available and we're in a repo
         check = subprocess.run(
@@ -194,7 +221,15 @@ def git_commit_train(model_name, val_score, metric_name, notes=""):
 
 
 def git_revert_train():
-    """Revert train.py to the last committed version."""
+    """Revert train.py to the last committed version via ``git checkout``.
+
+    Called when a training run does not improve the best validation score, so
+    the next experiment iteration starts from the last known-good model code.
+
+    Returns:
+        bool: True if the revert succeeded, False if git is unavailable or the
+            checkout command failed.
+    """
     try:
         result = subprocess.run(
             ["git", "checkout", "--", "src/train.py"],
@@ -213,7 +248,25 @@ def git_revert_train():
 
 def register_model_if_top_n(client, run_id, model_name, val_score,
                             experiment_name, top_n):
-    """Register model in MLflow registry and keep only the top N versions."""
+    """Register a model version in the MLflow Model Registry if it ranks in the top N.
+
+    The registry name is derived as ``agentml-<experiment_name>``.  After
+    registration, any versions beyond the top-N (by val_score) are deleted to
+    keep the registry tidy.
+
+    Args:
+        client (MlflowClient): Initialised MLflow tracking client.
+        run_id (str): MLflow run ID that produced the model artifact.
+        model_name (str): Human-readable model class name for the description.
+        val_score (float): Validation score used for ranking.
+        experiment_name (str): MLflow experiment name; determines the registry
+            name (``agentml-<experiment_name>``).
+        top_n (int): Maximum number of model versions to keep in the registry.
+
+    Returns:
+        bool: True if the model was registered, False if it did not qualify for
+            the top-N or if registration failed.
+    """
     registry_name = f"agentml-{experiment_name}"
 
     try:
@@ -286,7 +339,20 @@ def register_model_if_top_n(client, run_id, model_name, val_score,
 
 
 def print_summary(scores, train_result, improved):
-    """Print experiment summary."""
+    """Log a human-readable experiment summary and emit a strategy warning if needed.
+
+    Prints a formatted block with the current run's metrics alongside the
+    all-time best scores.  If three or more consecutive experiments have not
+    improved the best score, a warning is emitted suggesting config changes.
+
+    Args:
+        scores (dict): Current best-scores state as loaded/updated by
+            ``load_best_scores`` / ``save_best_scores``.
+        train_result (dict): Result dict returned by ``run_train``, containing
+            keys: ``model_name``, ``cv_mean``, ``cv_std``, ``val_score``,
+            ``training_time``.
+        improved (bool): Whether this run beat the previous best val_score.
+    """
     summary = (
         "\n" + "=" * 60 + "\n"
         "EXPERIMENT SUMMARY\n"

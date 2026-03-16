@@ -35,7 +35,22 @@ from sklearn.metrics import (
 
 
 def load_data(path=None):
-    """Load preprocessed data splits."""
+    """Load the preprocessed data splits produced by prepare.py.
+
+    Args:
+        path (str, optional): Absolute path to the pickle file.  Defaults to
+            ``<project_root>/processed/data_splits.pkl``.
+
+    Returns:
+        dict: Data bundle with keys ``X_train``, ``y_train``, ``X_val``,
+            ``y_val``, ``X_test``, ``y_test``, ``feature_names``, and
+            ``metadata`` (task type, metric, encoder/scaler objects, etc.).
+
+    Raises:
+        FileNotFoundError: If the pickle file does not exist (prepare.py has
+            not been run yet).
+        RuntimeError: If the pickle file is corrupt or cannot be deserialised.
+    """
     if path is None:
         path = os.path.join(PROJECT_ROOT, "processed", "data_splits.pkl")
     try:
@@ -52,9 +67,16 @@ def load_data(path=None):
 
 
 def get_model(task_type):
-    """
-    Return the model to train.
-    The agent modifies this function to try different models and hyperparameters.
+    """Return the estimator to train for the given task type.
+
+    The AI agent modifies this function to explore different model families
+    and hyperparameter configurations across experiment iterations.
+
+    Args:
+        task_type (str): Either ``"classification"`` or ``"regression"``.
+
+    Returns:
+        sklearn estimator: An unfitted scikit-learn compatible model instance.
     """
     if task_type == "classification":
         from sklearn.ensemble import HistGradientBoostingClassifier
@@ -77,10 +99,19 @@ def get_model(task_type):
 
 
 def get_scoring(task_type, metric=None):
-    """Get the sklearn scoring string for cross-validation.
+    """Return the scikit-learn scoring string to use for cross-validation.
 
     Uses the metric from program.md if explicitly configured; otherwise
-    falls back to f1_weighted for classification and neg_RMSE for regression.
+    falls back to ``f1_weighted`` for classification and
+    ``neg_root_mean_squared_error`` for regression.
+
+    Args:
+        task_type (str): Either ``"classification"`` or ``"regression"``.
+        metric (str, optional): Metric name from program.md config.  Pass
+            ``None`` or ``"auto"`` to use the task-type default.
+
+    Returns:
+        str: A valid scikit-learn scoring string (e.g. ``"f1_weighted"``).
     """
     if metric and metric != "auto":
         return metric
@@ -91,11 +122,30 @@ def get_scoring(task_type, metric=None):
 
 
 def evaluate_model(model, X_val, y_val, task_type, metric_name="auto"):
-    """
-    Evaluate the trained model on the validation set.
-    Returns (primary_score, all_metrics_dict).
-    Primary score matches the configured metric for fair comparison.
-    All metrics are logged to MLflow for full visibility.
+    """Evaluate a fitted model on the held-out validation set.
+
+    Computes a full suite of metrics for the task type and selects the
+    *primary* score that matches the configured metric so that all
+    experiments are compared on the same basis.
+
+    Classification metrics computed: f1_weighted, accuracy,
+    precision_weighted, recall_weighted.
+
+    Regression metrics computed: RMSE, MAE, adjusted-R².
+
+    Args:
+        model: A fitted scikit-learn compatible estimator.
+        X_val (np.ndarray): Validation feature matrix.
+        y_val (np.ndarray): Validation target vector.
+        task_type (str): Either ``"classification"`` or ``"regression"``.
+        metric_name (str): Primary metric name (e.g. ``"f1_weighted"``,
+            ``"neg_root_mean_squared_error"``).  Defaults to ``"auto"``
+            which selects the task-type default.
+
+    Returns:
+        tuple[float, dict]: ``(primary_score, all_metrics)`` where
+            ``primary_score`` is the scalar used for experiment comparison
+            and ``all_metrics`` is a dict of all computed metric values.
     """
     y_pred = model.predict(X_val)
 

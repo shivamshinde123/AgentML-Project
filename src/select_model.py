@@ -24,7 +24,19 @@ from mlflow.tracking import MlflowClient
 
 
 def parse_program_md(path=None):
-    """Parse YAML frontmatter from program.md."""
+    """Parse the YAML frontmatter block from program.md.
+
+    program.md is delimited by ``---`` fences; this function extracts and
+    parses the YAML section between the first two ``---`` lines.
+
+    Args:
+        path (str, optional): Path to program.md.  Defaults to
+            ``<project_root>/program.md``.
+
+    Returns:
+        dict: Parsed configuration (MLflow URI, experiment name, etc.).
+            Returns an empty dict if no YAML frontmatter is found.
+    """
     if path is None:
         path = os.path.join(PROJECT_ROOT, "program.md")
     try:
@@ -49,7 +61,24 @@ def parse_program_md(path=None):
 
 
 def get_registered_models(client, registry_name):
-    """Get all registered model versions with their metrics, sorted by val_score."""
+    """Fetch all registered model versions and their performance metrics.
+
+    Queries the MLflow Model Registry for every version under ``registry_name``,
+    retrieves the associated run's metrics and params, and returns them sorted
+    by ``val_score`` descending (best first).
+
+    Args:
+        client (MlflowClient): Initialised MLflow tracking client.
+        registry_name (str): Registered model name to query
+            (e.g. ``"agentml-my_experiment"``).
+
+    Returns:
+        list[dict]: One dict per registered version with keys:
+            ``version``, ``run_id``, ``model_name``, ``val_score``,
+            ``cv_mean``, ``cv_std``, ``training_time``, ``status``,
+            ``current_stage``, ``description``.
+            Returns an empty list if no model is registered under that name.
+    """
     try:
         versions = client.search_model_versions(f"name='{registry_name}'")
     except mlflow.exceptions.MlflowException:
@@ -94,7 +123,17 @@ def get_registered_models(client, registry_name):
 
 
 def list_models(client, registry_name):
-    """Print a table of all registered models."""
+    """Log a ranked table of all registered model versions to the logger.
+
+    Outputs a formatted table sorted by validation score (best first) that
+    shows rank, registry version, model class name, val_score, CV mean/std,
+    and training time.  Logs a message and returns early if no models are
+    registered yet.
+
+    Args:
+        client (MlflowClient): Initialised MLflow tracking client.
+        registry_name (str): Registered model name to list.
+    """
     models = get_registered_models(client, registry_name)
 
     if not models:
@@ -122,10 +161,17 @@ def list_models(client, registry_name):
 
 
 def promote_model(client, registry_name, rank):
-    """Promote the model at the given rank to Production stage.
+    """Promote the model at the given rank to the MLflow Production stage.
 
-    Only one model version is in Production at a time: any existing
-    Production version is archived before the new one is promoted.
+    Models are ranked by ``val_score`` descending (rank 1 = best).  Any
+    existing Production version is archived first so that only one model is
+    in Production at a time.
+
+    Args:
+        client (MlflowClient): Initialised MLflow tracking client.
+        registry_name (str): Registered model name to operate on.
+        rank (int): 1-based rank of the model to promote.  Must be between
+            1 and the total number of registered versions.
     """
     models = get_registered_models(client, registry_name)
 
