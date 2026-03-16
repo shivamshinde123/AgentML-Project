@@ -10,6 +10,7 @@ Usage:
 """
 
 import os
+import logging
 import argparse
 import yaml
 
@@ -17,6 +18,8 @@ import mlflow
 
 # Resolve project root (one level up from src/)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+logger = logging.getLogger(__name__)
 from mlflow.tracking import MlflowClient
 
 
@@ -28,17 +31,17 @@ def parse_program_md(path=None):
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
     except FileNotFoundError:
-        print(f"[select_model] ERROR: Config file not found: {path}")
+        logger.error("Config file not found: %s", path)
         raise SystemExit(1)
     except IOError as e:
-        print(f"[select_model] ERROR: Could not read config file {path}: {e}")
+        logger.error("Could not read config file %s: %s", path, e)
         raise SystemExit(1)
     parts = content.split("---", 2)
     if len(parts) >= 3:
         try:
             config = yaml.safe_load(parts[1])
         except yaml.YAMLError as e:
-            print(f"[select_model] ERROR: Failed to parse YAML frontmatter: {e}")
+            logger.error("Failed to parse YAML frontmatter: %s", e)
             raise SystemExit(1)
     else:
         config = {}
@@ -50,7 +53,7 @@ def get_registered_models(client, registry_name):
     try:
         versions = client.search_model_versions(f"name='{registry_name}'")
     except mlflow.exceptions.MlflowException:
-        print(f"No registered model found with name '{registry_name}'")
+        logger.warning("No registered model found with name '%s'", registry_name)
         return []
 
     model_info = []
@@ -95,22 +98,27 @@ def list_models(client, registry_name):
     models = get_registered_models(client, registry_name)
 
     if not models:
-        print("No models registered yet. Run some experiments first!")
+        logger.info("No models registered yet. Run some experiments first!")
         return
 
-    print(f"\nRegistered Models: {registry_name}")
-    print("=" * 100)
-    print(f"{'Rank':<6}{'Version':<9}{'Model':<30}{'Val Score':<14}"
-          f"{'CV Mean':<14}{'CV Std':<12}{'Time(s)':<10}")
-    print("-" * 100)
+    header = (
+        f"\nRegistered Models: {registry_name}\n"
+        + "=" * 100 + "\n"
+        + f"{'Rank':<6}{'Version':<9}{'Model':<30}{'Val Score':<14}"
+          f"{'CV Mean':<14}{'CV Std':<12}{'Time(s)':<10}\n"
+        + "-" * 100
+    )
+    logger.info(header)
 
     for i, m in enumerate(models, 1):
-        print(f"{i:<6}{m['version']:<9}{m['model_name']:<30}"
-              f"{m['val_score']:<14.6f}{m['cv_mean']:<14.6f}"
-              f"{m['cv_std']:<12.6f}{m['training_time']:<10.2f}")
+        logger.info(
+            "%-6d%-9s%-30s%-14.6f%-14.6f%-12.6f%-10.2f",
+            i, m['version'], m['model_name'],
+            m['val_score'], m['cv_mean'], m['cv_std'], m['training_time'],
+        )
 
-    print("=" * 100)
-    print(f"Total: {len(models)} model(s)")
+    logger.info("=" * 100)
+    logger.info("Total: %d model(s)", len(models))
 
 
 def promote_model(client, registry_name, rank):
@@ -122,11 +130,11 @@ def promote_model(client, registry_name, rank):
     models = get_registered_models(client, registry_name)
 
     if not models:
-        print("No models registered yet.")
+        logger.info("No models registered yet.")
         return
 
     if rank < 1 or rank > len(models):
-        print(f"Invalid rank {rank}. Available ranks: 1 to {len(models)}")
+        logger.error("Invalid rank %d. Available ranks: 1 to %d", rank, len(models))
         return
 
     # Models list is sorted by val_score descending, so rank 1 is the best
@@ -145,24 +153,29 @@ def promote_model(client, registry_name, rank):
                     version=m["version"],
                     stage="Archived",
                 )
-                print(f"Archived previous production model (version {m['version']})")
+                logger.info("Archived previous production model (version %s)", m['version'])
 
         client.transition_model_version_stage(
             name=registry_name,
             version=version,
             stage="Production",
         )
-        print(f"\nPromoted to Production:")
-        print(f"  Model:     {model_name}")
-        print(f"  Version:   {version}")
-        print(f"  Val Score:  {val_score:.6f}")
-        print(f"  Run ID:    {selected['run_id']}")
+        logger.info(
+            "Promoted to Production:\n  Model:     %s\n  Version:   %s\n"
+            "  Val Score:  %.6f\n  Run ID:    %s",
+            model_name, version, val_score, selected['run_id'],
+        )
 
     except Exception as e:
-        print(f"Error promoting model: {e}")
+        logger.error("Error promoting model: %s", e)
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     """Entry point for the model selector CLI.
 
     Resolves the MLflow tracking URI (supporting both local paths and remote
@@ -216,10 +229,10 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[select_model] Interrupted by user.")
+        logger.info("Interrupted by user.")
         raise SystemExit(1)
     except SystemExit:
         raise
     except Exception as e:
-        print(f"[select_model] Unexpected error: {e}")
+        logger.exception("Unexpected error: %s", e)
         raise

@@ -33,6 +33,7 @@ clean, fully numeric data and never needs its own preprocessing.
 """
 
 import os
+import logging
 import pickle
 import yaml
 import numpy as np
@@ -40,6 +41,8 @@ import pandas as pd
 
 # Resolve project root (one level up from src/)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+logger = logging.getLogger(__name__)
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import (
     StandardScaler, MinMaxScaler, RobustScaler, MaxAbsScaler,
@@ -136,8 +139,8 @@ def _try_convert_to_numeric(X):
                 converted_cols.append(col)
 
     if converted_cols:
-        print(f"[prepare] Converted {len(converted_cols)} string columns to numeric: "
-              f"{converted_cols}")
+        logger.info("Converted %d string columns to numeric: %s",
+                    len(converted_cols), converted_cols)
 
     return X
 
@@ -160,7 +163,7 @@ def load_dataset(config):
         )
     except Exception as e:
         raise RuntimeError(f"[prepare] Failed to load dataset from {path}: {e}")
-    print(f"[prepare] Loaded dataset: {path} ({df.shape[0]} rows, {df.shape[1]} columns)")
+    logger.info("Loaded dataset: %s (%d rows, %d columns)", path, df.shape[0], df.shape[1])
 
     if target_column not in df.columns:
         raise ValueError(
@@ -176,8 +179,8 @@ def load_dataset(config):
         y_parsed = _parse_numeric_from_string(y)
         successful = y_parsed.notna().sum()
         if successful > 0:
-            print(f"[prepare] Parsed target column from strings to numeric "
-                  f"({successful}/{len(y)} values)")
+            logger.info("Parsed target column from strings to numeric (%d/%d values)",
+                        successful, len(y))
             y = y_parsed
 
     # Drop rows where target is NaN (can't train on missing targets)
@@ -186,7 +189,7 @@ def load_dataset(config):
         n_dropped = nan_mask.sum()
         X = X[~nan_mask].reset_index(drop=True)
         y = y[~nan_mask].reset_index(drop=True)
-        print(f"[prepare] Dropped {n_dropped} rows with missing target values")
+        logger.info("Dropped %d rows with missing target values", n_dropped)
 
     return X, y
 
@@ -240,8 +243,8 @@ def drop_low_value_columns(X):
 
                 # If low cardinality, it's actually categorical -> keep it
                 if nunique <= 50:
-                    print(f"[prepare] Keeping '{col}' despite text-like name "
-                          f"({nunique} unique values, treating as categorical)")
+                    logger.info("Keeping '%s' despite text-like name "
+                                "(%d unique values, treating as categorical)", col, nunique)
                     continue
 
                 # Try to extract numeric info (e.g., "3 BHK Flat" -> 3)
@@ -253,8 +256,8 @@ def drop_low_value_columns(X):
                         r'(\d+)', expand=False
                     ).astype(float)
                     extracted[col] = extracted_name
-                    print(f"[prepare] Extracted numeric feature '{extracted_name}' "
-                          f"from '{col}'")
+                    logger.info("Extracted numeric feature '%s' from '%s'",
+                                extracted_name, col)
 
                 dropped.append(col)
                 continue
@@ -282,9 +285,9 @@ def drop_low_value_columns(X):
 
     if dropped:
         X = X.drop(columns=dropped)
-        print(f"[prepare] Dropped {len(dropped)} low-value columns: {dropped}")
+        logger.info("Dropped %d low-value columns: %s", len(dropped), dropped)
     else:
-        print("[prepare] No low-value columns detected")
+        logger.info("No low-value columns detected")
 
     return X
 
@@ -294,7 +297,7 @@ def detect_task_type(y, config):
     task_type = config.get("dataset", {}).get("task_type", "auto")
 
     if task_type != "auto":
-        print(f"[prepare] Task type (from config): {task_type}")
+        logger.info("Task type (from config): %s", task_type)
         return task_type
 
     if y.dtype == "object" or y.dtype.name == "category":
@@ -304,7 +307,7 @@ def detect_task_type(y, config):
     else:
         task_type = "regression"
 
-    print(f"[prepare] Task type (auto-detected): {task_type}")
+    logger.info("Task type (auto-detected): %s", task_type)
     return task_type
 
 
@@ -326,7 +329,7 @@ def remove_duplicates(X, y, skip_steps):
     X = X.reset_index(drop=True)
     y = y.reset_index(drop=True)
 
-    print(f"[prepare] Removed {before - after} duplicate rows ({before} -> {after})")
+    logger.info("Removed %d duplicate rows (%d -> %d)", before - after, before, after)
     return X, y
 
 
@@ -343,8 +346,8 @@ def impute_missing(X, skip_steps, imputer_type="median"):
     CRITICAL: This step is always executed regardless of skip_steps.
     """
     if "imputation" in skip_steps:
-        print("[prepare] WARNING: Imputation is a critical step and cannot be skipped. "
-              "Ignoring skip request.")
+        logger.warning("Imputation is a critical step and cannot be skipped. "
+                       "Ignoring skip request.")
 
     numerical_cols = X.select_dtypes(include=["number"]).columns.tolist()
     categorical_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
@@ -361,7 +364,7 @@ def impute_missing(X, skip_steps, imputer_type="median"):
     if all_nan_cols:
         X = X.drop(columns=all_nan_cols)
         numerical_cols = [c for c in numerical_cols if c not in all_nan_cols]
-        print(f"[prepare] Dropped {len(all_nan_cols)} all-NaN columns: {all_nan_cols}")
+        logger.info("Dropped %d all-NaN columns: %s", len(all_nan_cols), all_nan_cols)
 
     # Impute numerical columns based on strategy, with fallback chain
     IMPUTER_FALLBACK_ORDER = ["knn", "iterative", "mean", "median"]
@@ -397,23 +400,22 @@ def impute_missing(X, skip_steps, imputer_type="median"):
                     label = "median"
 
                 if method != imputer_type:
-                    print(f"[prepare] WARNING: '{imputer_type}' imputation failed, "
-                          f"fell back to '{method}'")
-                print(f"[prepare] Imputed {missing_before} missing values "
-                      f"(numerical: {label}, categorical: mode)")
+                    logger.warning("'%s' imputation failed, fell back to '%s'",
+                                   imputer_type, method)
+                logger.info("Imputed %d missing values (numerical: %s, categorical: mode)",
+                            missing_before, label)
                 succeeded = True
                 break
 
             except Exception as e:
-                print(f"[prepare] Imputation method '{method}' failed: {e}")
+                logger.warning("Imputation method '%s' failed: %s", method, e)
                 continue
 
         if not succeeded:
             raise RuntimeError("[prepare] CRITICAL: All imputation methods failed.")
     else:
-        print(f"[prepare] Imputed {missing_before} missing values "
-              f"({len(numerical_cols)} numerical cols, "
-              f"{len(categorical_cols)} categorical cols with mode)")
+        logger.info("Imputed %d missing values (%d numerical cols, %d categorical cols with mode)",
+                    missing_before, len(numerical_cols), len(categorical_cols))
 
     return X
 
@@ -431,14 +433,14 @@ def encode_categoricals(X, y, task_type, skip_steps, encoder_type="label_onehot"
     Also handles target variable encoding for classification tasks.
     """
     if "encoding" in skip_steps:
-        print("[prepare] WARNING: Encoding is a critical step and cannot be skipped. "
-              "Ignoring skip request.")
+        logger.warning("Encoding is a critical step and cannot be skipped. "
+                       "Ignoring skip request.")
 
     categorical_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
     encoders = {}
 
     if len(categorical_cols) == 0:
-        print("[prepare] No categorical features to encode")
+        logger.info("No categorical features to encode")
     else:
         ENCODER_FALLBACK_ORDER = ["label_onehot", "ordinal", "target"]
         methods_to_try = [encoder_type] + [m for m in ENCODER_FALLBACK_ORDER
@@ -510,14 +512,14 @@ def encode_categoricals(X, y, task_type, skip_steps, encoder_type="label_onehot"
                 X = X_attempt
                 encoders = encoders_attempt
                 if method != encoder_type:
-                    print(f"[prepare] WARNING: '{encoder_type}' encoding failed, "
-                          f"fell back to '{method}'")
-                print(f"[prepare] {label}")
+                    logger.warning("'%s' encoding failed, fell back to '%s'",
+                                   encoder_type, method)
+                logger.info(label)
                 succeeded = True
                 break
 
             except Exception as e:
-                print(f"[prepare] Encoding method '{method}' failed: {e}")
+                logger.warning("Encoding method '%s' failed: %s", method, e)
                 continue
 
         if not succeeded:
@@ -529,7 +531,7 @@ def encode_categoricals(X, y, task_type, skip_steps, encoder_type="label_onehot"
         target_encoder = LabelEncoder()
         y = pd.Series(target_encoder.fit_transform(y), name=y.name)
         encoders["__target__"] = {"type": "label", "encoder": target_encoder}
-        print(f"[prepare] Encoded target variable: {list(target_encoder.classes_)}")
+        logger.info("Encoded target variable: %s", list(target_encoder.classes_))
 
     return X, y, encoders
 
@@ -544,7 +546,7 @@ def get_scaler(scaler_type):
     }
 
     if scaler_type not in scalers:
-        print(f"[prepare] Unknown scaler '{scaler_type}', falling back to StandardScaler")
+        logger.warning("Unknown scaler '%s', falling back to StandardScaler", scaler_type)
         scaler_type = "standard"
 
     return scalers[scaler_type](), scaler_type
@@ -557,13 +559,13 @@ def normalize(X, skip_steps, scaler_type="standard"):
     CRITICAL: This step is always executed regardless of skip_steps.
     """
     if "normalization" in skip_steps:
-        print("[prepare] WARNING: Normalization is a critical step and cannot be skipped. "
-              "Ignoring skip request.")
+        logger.warning("Normalization is a critical step and cannot be skipped. "
+                       "Ignoring skip request.")
 
     numerical_cols = X.select_dtypes(include=["number"]).columns
 
     if len(numerical_cols) == 0:
-        print("[prepare] No numerical features to normalize")
+        logger.info("No numerical features to normalize")
         return X, None, scaler_type
 
     SCALER_FALLBACK_ORDER = ["standard", "minmax", "robust", "maxabs"]
@@ -575,14 +577,13 @@ def normalize(X, skip_steps, scaler_type="standard"):
             scaler, actual_type = get_scaler(method)
             X[numerical_cols] = scaler.fit_transform(X[numerical_cols])
             if method != scaler_type:
-                print(f"[prepare] WARNING: '{scaler_type}' scaler failed, "
-                      f"fell back to '{method}'")
-            print(f"[prepare] Applied {actual_type} scaler ({type(scaler).__name__}) "
-                  f"to {len(numerical_cols)} numerical features")
+                logger.warning("'%s' scaler failed, fell back to '%s'", scaler_type, method)
+            logger.info("Applied %s scaler (%s) to %d numerical features",
+                        actual_type, type(scaler).__name__, len(numerical_cols))
             return X, scaler, actual_type
 
         except Exception as e:
-            print(f"[prepare] Scaler '{method}' failed: {e}")
+            logger.warning("Scaler '%s' failed: %s", method, e)
             continue
 
     raise RuntimeError("[prepare] CRITICAL: All normalization methods failed.")
@@ -596,11 +597,11 @@ def handle_imbalance(X, y, task_type, skip_steps, threshold=0.2):
     For regression tasks, this is a no-op.
     """
     if "smote" in skip_steps:
-        print("[prepare] WARNING: Class imbalance handling is a critical step and "
-              "cannot be skipped. Ignoring skip request.")
+        logger.warning("Class imbalance handling is a critical step and "
+                       "cannot be skipped. Ignoring skip request.")
 
     if task_type != "classification":
-        print("[prepare] Skipping SMOTE (not a classification task)")
+        logger.info("Skipping SMOTE (not a classification task)")
         return X, y
 
     class_counts = y.value_counts()
@@ -609,23 +610,22 @@ def handle_imbalance(X, y, task_type, skip_steps, threshold=0.2):
     imbalance_ratio = minority_count / majority_count
 
     if imbalance_ratio >= (1 - threshold):
-        print(f"[prepare] No class imbalance detected (ratio={imbalance_ratio:.3f}), "
-              f"skipping SMOTE")
+        logger.info("No class imbalance detected (ratio=%.3f), skipping SMOTE",
+                    imbalance_ratio)
         return X, y
 
-    print(f"[prepare] Class imbalance detected (ratio={imbalance_ratio:.3f}), "
-          f"applying SMOTE")
+    logger.info("Class imbalance detected (ratio=%.3f), applying SMOTE", imbalance_ratio)
 
     min_samples = class_counts.min()
     k_neighbors = min(5, min_samples - 1)
     if k_neighbors < 1:
-        print("[prepare] Too few minority samples for SMOTE, skipping")
+        logger.info("Too few minority samples for SMOTE, skipping")
         return X, y
 
     smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
     X_resampled, y_resampled = smote.fit_resample(X, y)
 
-    print(f"[prepare] SMOTE resampling: {len(X)} -> {len(X_resampled)} samples")
+    logger.info("SMOTE resampling: %d -> %d samples", len(X), len(X_resampled))
     X = pd.DataFrame(X_resampled, columns=X.columns)
     y = pd.Series(y_resampled, name=y.name)
     return X, y
@@ -634,16 +634,16 @@ def handle_imbalance(X, y, task_type, skip_steps, threshold=0.2):
 def select_features(X, y, task_type, skip_steps, max_features=20):
     """Apply SelectKBest if number of features exceeds max_features."""
     if "feature_selection" in skip_steps:
-        print("[prepare] Skipping feature selection (as configured)")
+        logger.info("Skipping feature selection (as configured)")
         return X, None
 
     if X.shape[1] <= max_features:
-        print(f"[prepare] {X.shape[1]} features <= {max_features} threshold, "
-              f"skipping feature selection")
+        logger.info("%d features <= %d threshold, skipping feature selection",
+                    X.shape[1], max_features)
         return X, None
 
-    print(f"[prepare] {X.shape[1]} features > {max_features} threshold, "
-          f"applying SelectKBest (k={max_features})")
+    logger.info("%d features > %d threshold, applying SelectKBest (k=%d)",
+                X.shape[1], max_features, max_features)
 
     score_func = f_classif if task_type == "classification" else f_regression
     selector = SelectKBest(score_func=score_func, k=max_features)
@@ -653,7 +653,7 @@ def select_features(X, y, task_type, skip_steps, max_features=20):
     selected_columns = X.columns[selected_mask].tolist()
     X = pd.DataFrame(X_selected, columns=selected_columns)
 
-    print(f"[prepare] Selected {len(selected_columns)} features: {selected_columns}")
+    logger.info("Selected %d features: %s", len(selected_columns), selected_columns)
     return X, selector
 
 
@@ -670,7 +670,7 @@ def split_data(X, y, task_type):
         X_temp, y_temp, test_size=0.5, random_state=42, stratify=stratify_temp
     )
 
-    print(f"[prepare] Split: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+    logger.info("Split: train=%d, val=%d, test=%d", len(X_train), len(X_val), len(X_test))
     return X_train, X_val, X_test, y_train, y_val, y_test
 
 
@@ -717,7 +717,7 @@ def save_processed(X_train, X_val, X_test, y_train, y_val, y_test,
     except IOError as e:
         raise RuntimeError(f"[prepare] Could not save processed data to {output_path}: {e}")
 
-    print(f"[prepare] Saved processed data to {output_path}")
+    logger.info("Saved processed data to %s", output_path)
     return output_path
 
 
@@ -736,8 +736,8 @@ def sanitize_skip_steps(skip_steps):
     """Remove critical steps from skip_steps and warn the user."""
     blocked = [s for s in skip_steps if s in CRITICAL_STEPS]
     if blocked:
-        print(f"[prepare] WARNING: The following critical steps cannot be skipped "
-              f"and will be executed anyway: {blocked}")
+        logger.warning("The following critical steps cannot be skipped "
+                       "and will be executed anyway: %s", blocked)
     # Only allow non-critical steps to be skipped (duplicates, feature_selection)
     return [s for s in skip_steps if s not in CRITICAL_STEPS]
 
@@ -746,9 +746,14 @@ def main(config_path=None):
     if config_path is None:
         config_path = os.path.join(PROJECT_ROOT, "program.md")
     """Run the full preprocessing pipeline with alternative strategy support."""
-    print("=" * 60)
-    print("AgentML Data Preparation Pipeline")
-    print("=" * 60)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    logger.info("=" * 60)
+    logger.info("AgentML Data Preparation Pipeline")
+    logger.info("=" * 60)
 
     # Parse config
     config, instructions = parse_program_md(config_path)
@@ -758,8 +763,8 @@ def main(config_path=None):
     imputer_type = config.get("preprocessing", {}).get("imputer", "median")
     encoder_type = config.get("preprocessing", {}).get("encoder", "label_onehot")
 
-    print(f"[prepare] Config: imputer={imputer_type}, encoder={encoder_type}, "
-          f"scaler={scaler_type}")
+    logger.info("Config: imputer=%s, encoder=%s, scaler=%s",
+                imputer_type, encoder_type, scaler_type)
 
     # Load dataset
     X, y = load_dataset(config)
@@ -784,7 +789,7 @@ def main(config_path=None):
     # conversion may have introduced new NaNs. Fill any remaining NaNs.
     remaining_nans = X.isnull().sum().sum()
     if remaining_nans > 0:
-        print(f"[prepare] Post-encoding cleanup: filling {remaining_nans} remaining NaNs")
+        logger.info("Post-encoding cleanup: filling %d remaining NaNs", remaining_nans)
         numerical_cols = X.select_dtypes(include=["number"]).columns
         for col in numerical_cols:
             if X[col].isnull().any():
@@ -832,18 +837,21 @@ def main(config_path=None):
     save_processed(X_train, X_val, X_test, y_train, y_val, y_test,
                    feature_names, metadata)
 
-    print("=" * 60)
-    print("[prepare] Preprocessing complete!")
-    print(f"  Task type:    {task_type}")
-    print(f"  Metric:       {metric_name}")
-    print(f"  Imputer:      {imputer_type}")
-    print(f"  Encoder:      {encoder_type}")
-    print(f"  Scaler:       {actual_scaler_type}")
-    print(f"  Features:     {len(feature_names)}")
-    print(f"  Train size:   {len(X_train)}")
-    print(f"  Val size:     {len(X_val)}")
-    print(f"  Test size:    {len(X_test)}")
-    print("=" * 60)
+    summary = (
+        "=" * 60 + "\n"
+        "Preprocessing complete!\n"
+        f"  Task type:    {task_type}\n"
+        f"  Metric:       {metric_name}\n"
+        f"  Imputer:      {imputer_type}\n"
+        f"  Encoder:      {encoder_type}\n"
+        f"  Scaler:       {actual_scaler_type}\n"
+        f"  Features:     {len(feature_names)}\n"
+        f"  Train size:   {len(X_train)}\n"
+        f"  Val size:     {len(X_val)}\n"
+        f"  Test size:    {len(X_test)}\n"
+        + "=" * 60
+    )
+    logger.info(summary)
 
     return metadata
 
@@ -852,9 +860,9 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[prepare] Interrupted by user.")
+        logger.info("Interrupted by user.")
         import sys
         sys.exit(1)
     except Exception as e:
-        print(f"[prepare] ERROR: {e}")
+        logger.exception("ERROR: %s", e)
         raise
