@@ -15,12 +15,15 @@ Notes: Baseline with clean preprocessed data from prepare.py.
 
 import os
 import json
+import logging
 import time
 import pickle
 import numpy as np
 
 # Resolve project root (one level up from src/)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+logger = logging.getLogger(__name__)
 import mlflow
 import mlflow.sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -217,12 +220,17 @@ def train():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     try:
         train()
     except KeyboardInterrupt:
-        print("\n[train] Interrupted by user.")
+        logger.info("Interrupted by user.")
         import sys
         sys.exit(1)
     except Exception as e:
-        print(f"[train] ERROR: {e}")
+        logger.exception("ERROR: %s", e)
         raise
