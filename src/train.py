@@ -32,9 +32,9 @@ from sklearn.metrics import (
 
 
 def load_data(path=None):
+    """Load preprocessed data splits."""
     if path is None:
         path = os.path.join(PROJECT_ROOT, "processed", "data_splits.pkl")
-    """Load preprocessed data splits."""
     try:
         with open(path, "rb") as f:
             data = pickle.load(f)
@@ -74,7 +74,11 @@ def get_model(task_type):
 
 
 def get_scoring(task_type, metric=None):
-    """Get the sklearn scoring string for cross-validation."""
+    """Get the sklearn scoring string for cross-validation.
+
+    Uses the metric from program.md if explicitly configured; otherwise
+    falls back to f1_weighted for classification and neg_RMSE for regression.
+    """
     if metric and metric != "auto":
         return metric
     if task_type == "classification":
@@ -129,10 +133,18 @@ def evaluate_model(model, X_val, y_val, task_type, metric_name="auto"):
 
 
 def train():
-    """Run a single training experiment."""
+    """Run a single training experiment.
+
+    Loads preprocessed splits, performs k-fold cross-validation on the training
+    set, fits the final model, evaluates on the validation set, and logs
+    everything (params, metrics, model artifact) to MLflow.
+
+    The result dict is printed as JSON on the last line of stdout so that
+    run_experiment.py can parse it from the subprocess output.
+    """
     data = load_data()
     metadata = data["metadata"]
-    task_type = metadata["task_type"]
+    task_type = metadata["task_type"]       # "classification" or "regression"
     metric_name = metadata.get("metric", "auto")
     cv_folds = metadata.get("cv_folds", 10)
 
@@ -146,6 +158,8 @@ def train():
     scoring = get_scoring(task_type, metric_name)
     model_name = type(model).__name__
 
+    # Attach to the MLflow run created by run_experiment.py (passed via env vars),
+    # or start a new standalone run when train.py is executed directly.
     run_id = os.environ.get("MLFLOW_RUN_ID")
     default_mlruns = "file:///" + os.path.normpath(
         os.path.join(PROJECT_ROOT, "mlruns")).replace("\\", "/")
@@ -153,8 +167,10 @@ def train():
     mlflow.set_tracking_uri(tracking_uri)
 
     if run_id:
+        # Reuse the parent run opened by the orchestrator
         run_context = mlflow.start_run(run_id=run_id)
     else:
+        # Standalone execution: open a new run under the configured experiment
         experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME", "agentml_experiment")
         mlflow.set_experiment(experiment_name)
         run_context = mlflow.start_run()
@@ -162,6 +178,7 @@ def train():
     with run_context:
         actual_run_id = mlflow.active_run().info.run_id
 
+        # Cross-validation on training data to estimate generalisation performance
         start_time = time.time()
         cv_scores = cross_val_score(
             model, X_train, y_train,
@@ -169,23 +186,29 @@ def train():
         )
         cv_time = time.time() - start_time
 
+        # Final fit on the full training set
         train_start = time.time()
         model.fit(X_train, y_train)
         train_time = time.time() - train_start
 
         total_time = cv_time + train_time
+
+        # Evaluate on the held-out validation set
         val_score, all_metrics = evaluate_model(
             model, X_val, y_val, task_type, metric_name
         )
 
+        # Log model identity and all hyperparameters
         mlflow.log_param("model_name", model_name)
         model_params = model.get_params()
         for k, v in model_params.items():
             try:
                 mlflow.log_param(k, v)
             except Exception:
+                # Truncate params that exceed MLflow's 250-char limit
                 mlflow.log_param(k, str(v)[:250])
 
+        # Log summary metrics used by the orchestrator for comparison
         mlflow.log_metric("cv_mean", float(np.mean(cv_scores)))
         mlflow.log_metric("cv_std", float(np.std(cv_scores)))
         mlflow.log_metric("val_score", float(val_score))
@@ -198,8 +221,10 @@ def train():
 
         notes = "HGBR baseline: max_iter=500, lr=0.05, depth=6, min_leaf=20, l2=0.1"
         mlflow.log_param("agent_notes", notes)
+        # Persist the fitted model as an MLflow artifact for later retrieval
         mlflow.sklearn.log_model(model, "model")
 
+        # Build result dict — printed as JSON so run_experiment.py can parse it
         result = {
             "run_id": actual_run_id,
             "model_name": model_name,
