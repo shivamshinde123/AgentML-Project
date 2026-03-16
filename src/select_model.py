@@ -171,17 +171,17 @@ def promote_model(client, registry_name, rank):
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
     """Entry point for the model selector CLI.
 
     Resolves the MLflow tracking URI (supporting both local paths and remote
     URIs), builds the registry name from the experiment name, then delegates
     to list_models() or promote_model() based on the supplied flags.
     """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     parser = argparse.ArgumentParser(description="AgentML Model Selector")
     parser.add_argument("--list", action="store_true",
                         help="List all registered models with metrics")
