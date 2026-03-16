@@ -60,11 +60,22 @@ def parse_program_md(path=None):
     if path is None:
         path = os.path.join(PROJECT_ROOT, "program.md")
     """Parse YAML frontmatter from program.md."""
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"[prepare] Config file not found: {path}. "
+            "Ensure program.md exists at the project root."
+        )
+    except IOError as e:
+        raise IOError(f"[prepare] Could not read config file {path}: {e}")
     parts = content.split("---", 2)
     if len(parts) >= 3:
-        config = yaml.safe_load(parts[1])
+        try:
+            config = yaml.safe_load(parts[1])
+        except yaml.YAMLError as e:
+            raise ValueError(f"[prepare] Failed to parse YAML frontmatter: {e}")
         instructions = parts[2].strip()
     else:
         config = {}
@@ -140,7 +151,15 @@ def load_dataset(config):
         path = os.path.join(PROJECT_ROOT, path)
     target_column = dataset_config.get("target_column", "target")
 
-    df = pd.read_csv(path)
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"[prepare] Dataset not found: {path}. "
+            "Check the 'path' setting in program.md."
+        )
+    except Exception as e:
+        raise RuntimeError(f"[prepare] Failed to load dataset from {path}: {e}")
     print(f"[prepare] Loaded dataset: {path} ({df.shape[0]} rows, {df.shape[1]} columns)")
 
     if target_column not in df.columns:
@@ -674,7 +693,11 @@ def save_processed(X_train, X_val, X_test, y_train, y_val, y_test,
     if output_dir is None:
         output_dir = os.path.join(PROJECT_ROOT, "processed")
     """Save processed data splits to pickle file."""
-    os.makedirs(output_dir, exist_ok=True)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError(f"[prepare] Could not create output directory {output_dir}: {e}")
+
     output_path = os.path.join(output_dir, "data_splits.pkl")
 
     data = {
@@ -688,8 +711,11 @@ def save_processed(X_train, X_val, X_test, y_train, y_val, y_test,
         "metadata": metadata,
     }
 
-    with open(output_path, "wb") as f:
-        pickle.dump(data, f)
+    try:
+        with open(output_path, "wb") as f:
+            pickle.dump(data, f)
+    except IOError as e:
+        raise RuntimeError(f"[prepare] Could not save processed data to {output_path}: {e}")
 
     print(f"[prepare] Saved processed data to {output_path}")
     return output_path
@@ -823,4 +849,12 @@ def main(config_path=None):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[prepare] Interrupted by user.")
+        import sys
+        sys.exit(1)
+    except Exception as e:
+        print(f"[prepare] ERROR: {e}")
+        raise

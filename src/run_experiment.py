@@ -29,11 +29,22 @@ def parse_program_md(path=None):
     if path is None:
         path = os.path.join(PROJECT_ROOT, "program.md")
     """Parse YAML frontmatter from program.md."""
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        print(f"[orchestrator] ERROR: Config file not found: {path}")
+        sys.exit(1)
+    except IOError as e:
+        print(f"[orchestrator] ERROR: Could not read config file {path}: {e}")
+        sys.exit(1)
     parts = content.split("---", 2)
     if len(parts) >= 3:
-        config = yaml.safe_load(parts[1])
+        try:
+            config = yaml.safe_load(parts[1])
+        except yaml.YAMLError as e:
+            print(f"[orchestrator] ERROR: Failed to parse YAML frontmatter: {e}")
+            sys.exit(1)
         instructions = parts[2].strip()
     else:
         config = {}
@@ -46,8 +57,15 @@ def load_best_scores(path=None):
         path = os.path.join(PROJECT_ROOT, "best_scores.json")
     """Load the best scores tracking file."""
     if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"[orchestrator] WARNING: Could not parse best_scores.json: {e}. "
+                  "Starting fresh.")
+        except IOError as e:
+            print(f"[orchestrator] WARNING: Could not read best_scores.json: {e}. "
+                  "Starting fresh.")
     return {
         "best_val_score": None,
         "best_run_id": None,
@@ -62,8 +80,11 @@ def save_best_scores(scores, path=None):
     if path is None:
         path = os.path.join(PROJECT_ROOT, "best_scores.json")
     """Save the best scores tracking file."""
-    with open(path, "w") as f:
-        json.dump(scores, f, indent=2)
+    try:
+        with open(path, "w") as f:
+            json.dump(scores, f, indent=2)
+    except IOError as e:
+        print(f"[orchestrator] WARNING: Could not save best_scores.json: {e}")
 
 
 def run_prepare(config, force=False):
@@ -380,4 +401,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[orchestrator] Interrupted by user.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"[orchestrator] Unexpected error: {e}")
+        raise

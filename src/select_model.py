@@ -24,11 +24,22 @@ def parse_program_md(path=None):
     if path is None:
         path = os.path.join(PROJECT_ROOT, "program.md")
     """Parse YAML frontmatter from program.md."""
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        print(f"[select_model] ERROR: Config file not found: {path}")
+        raise SystemExit(1)
+    except IOError as e:
+        print(f"[select_model] ERROR: Could not read config file {path}: {e}")
+        raise SystemExit(1)
     parts = content.split("---", 2)
     if len(parts) >= 3:
-        config = yaml.safe_load(parts[1])
+        try:
+            config = yaml.safe_load(parts[1])
+        except yaml.YAMLError as e:
+            print(f"[select_model] ERROR: Failed to parse YAML frontmatter: {e}")
+            raise SystemExit(1)
     else:
         config = {}
     return config
@@ -188,4 +199,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[select_model] Interrupted by user.")
+        raise SystemExit(1)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"[select_model] Unexpected error: {e}")
+        raise
