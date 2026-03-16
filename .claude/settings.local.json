@@ -11,6 +11,14 @@
       "Bash(uv add:*)",
       "Bash(python -c \"import xgboost; print\\(xgboost.__version__\\)\")",
       "Bash(pip install:*)"
+    ],
+    "deny": [
+      "Bash(gh repo delete*)",
+      "Bash(gh release delete*)",
+      "Bash(gh run delete*)",
+      "Bash(rm -rf*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)"
     ]
   }
 }
