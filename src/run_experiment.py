@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 def parse_program_md(path=None):
+    """Parse YAML frontmatter from program.md."""
     if path is None:
         path = os.path.join(PROJECT_ROOT, "program.md")
-    """Parse YAML frontmatter from program.md."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -56,9 +56,9 @@ def parse_program_md(path=None):
 
 
 def load_best_scores(path=None):
+    """Load the best scores tracking file."""
     if path is None:
         path = os.path.join(PROJECT_ROOT, "best_scores.json")
-    """Load the best scores tracking file."""
     if os.path.exists(path):
         try:
             with open(path, "r") as f:
@@ -78,9 +78,9 @@ def load_best_scores(path=None):
 
 
 def save_best_scores(scores, path=None):
+    """Save the best scores tracking file."""
     if path is None:
         path = os.path.join(PROJECT_ROOT, "best_scores.json")
-    """Save the best scores tracking file."""
     try:
         with open(path, "w") as f:
             json.dump(scores, f, indent=2)
@@ -115,7 +115,13 @@ def run_prepare(config, force=False):
 
 
 def run_train(tracking_uri, run_id, experiment_name):
-    """Run train.py as a subprocess with MLflow context."""
+    """Run train.py as a subprocess with MLflow context.
+
+    Passes MLflow context via environment variables so train.py logs
+    metrics into the same parent run started by the orchestrator.
+    Returns the parsed JSON result dict from train.py stdout, or None on failure.
+    """
+    # Inject MLflow context so train.py attaches to the orchestrator's active run
     env = os.environ.copy()
     env["MLFLOW_TRACKING_URI"] = tracking_uri
     env["MLFLOW_RUN_ID"] = run_id
@@ -130,7 +136,7 @@ def run_train(tracking_uri, run_id, experiment_name):
         logger.error("Training failed!\n%s", result.stderr)
         return None
 
-    # Parse JSON result from stdout (last line)
+    # train.py prints a single JSON result as its last line; preceding lines are logs
     stdout_lines = result.stdout.strip().split("\n")
     try:
         train_result = json.loads(stdout_lines[-1])
@@ -310,6 +316,17 @@ def main():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    """Orchestrate a single experiment: preprocess → train → evaluate → commit/revert.
+
+    High-level flow:
+      1. Parse program.md for config (MLflow URI, experiment name, top-N threshold).
+      2. Run prepare.py to produce train/val/test splits (skipped if already cached).
+      3. Open an MLflow parent run, then run train.py as a child process.
+      4. Compare the new val_score against the all-time best stored in best_scores.json.
+      5. If improved  → commit train.py to git and update best_scores.json.
+         If no improvement → revert train.py to the last committed version.
+      6. Attempt to register the model in the MLflow registry (keeps top-N only).
+    """
     parser = argparse.ArgumentParser(description="AgentML Experiment Orchestrator")
     parser.add_argument("--force-prepare", action="store_true",
                         help="Re-run preprocessing even if splits exist")
@@ -317,19 +334,22 @@ def main():
                         help="Override MLflow experiment name")
     args = parser.parse_args()
 
-    # Parse config
+    # Parse config from program.md YAML frontmatter
     config, instructions = parse_program_md()
     mlflow_config = config.get("mlflow", {})
     raw_tracking_uri = mlflow_config.get("tracking_uri", "./mlruns")
     # Resolve relative tracking URIs against project root and use file: URI for MLflow
     if raw_tracking_uri.startswith(("http://", "https://", "databricks", "sqlite", "postgresql", "mysql", "mssql")):
+        # Remote / DB-backed URIs are used as-is
         tracking_uri = raw_tracking_uri
     else:
+        # Convert relative path to an absolute file:// URI so MLflow resolves correctly
         resolved = os.path.normpath(os.path.join(PROJECT_ROOT, raw_tracking_uri))
         tracking_uri = "file:///" + resolved.replace("\\", "/")
     experiment_name = args.experiment_name or mlflow_config.get(
         "experiment_name", "agentml_experiment"
     )
+    # How many best model versions to keep in the MLflow registry
     top_n = mlflow_config.get("top_n_models", 5)
 
     logger.info("=" * 60)
@@ -339,37 +359,40 @@ def main():
     logger.info("  Prepare script: src/prepare.py")
     logger.info("=" * 60)
 
-    # Step 1: Run preprocessing
+    # Step 1: Run preprocessing (produces processed/data_splits.pkl)
     if not run_prepare(config, force=args.force_prepare):
         logger.error("Preprocessing failed, aborting.")
         sys.exit(1)
 
-    # Step 2: Set up MLflow
+    # Step 2: Set up MLflow tracking
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
     client = MlflowClient(tracking_uri=tracking_uri)
 
-    # Step 3: Start MLflow run and execute training
+    # Step 3: Start MLflow parent run and execute training in a subprocess
     with mlflow.start_run() as parent_run:
         run_id = parent_run.info.run_id
         logger.info("Started MLflow run: %s", run_id)
 
-        # Run train.py
+        # Run train.py; it logs metrics/params into this same MLflow run via env vars
         train_result = run_train(tracking_uri, run_id, experiment_name)
 
         if train_result is None:
             logger.error("Training failed. Reverting train.py.")
+            # Training failed — mark the run as failed and revert train.py
+            print("[orchestrator] Training failed. Reverting train.py.")
             mlflow.set_tag("status", "FAILED")
             git_revert_train()
             sys.exit(1)
 
-    # Step 4: Check if improved
+    # Step 4: Compare new score against the historical best
     scores = load_best_scores()
     val_score = train_result["val_score"]
     model_name = train_result["model_name"]
     metric_name = train_result.get("metric_name", "val_score")
     notes = train_result.get("notes", "")
 
+    # Append this experiment to the history log
     scores["total_experiments"] += 1
     scores["history"].append({
         "run_id": train_result["run_id"],
@@ -380,6 +403,7 @@ def main():
         "timestamp": datetime.now().isoformat(),
     })
 
+    # Determine whether this run beat the all-time best
     improved = False
     if scores["best_val_score"] is None or val_score > scores["best_val_score"]:
         improved = True
@@ -389,9 +413,10 @@ def main():
         scores["best_metrics"] = train_result.get("all_metrics", {})
         scores["consecutive_no_improvement"] = 0
     else:
+        # Track consecutive non-improving experiments to prompt strategy changes
         scores["consecutive_no_improvement"] += 1
 
-    # Step 5: Git commit or revert
+    # Step 5: Git commit if improved, else revert train.py to last good version
     if improved:
         git_commit_train(model_name, val_score, metric_name, notes)
     else:
@@ -405,7 +430,7 @@ def main():
         val_score, experiment_name, top_n,
     )
 
-    # Step 6: Save scores and print summary
+    # Step 6: Persist updated scores and display experiment summary
     save_best_scores(scores)
     print_summary(scores, train_result, improved)
 

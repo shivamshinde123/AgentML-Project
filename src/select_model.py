@@ -24,9 +24,9 @@ from mlflow.tracking import MlflowClient
 
 
 def parse_program_md(path=None):
+    """Parse YAML frontmatter from program.md."""
     if path is None:
         path = os.path.join(PROJECT_ROOT, "program.md")
-    """Parse YAML frontmatter from program.md."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -122,7 +122,11 @@ def list_models(client, registry_name):
 
 
 def promote_model(client, registry_name, rank):
-    """Promote the model at the given rank to Production stage."""
+    """Promote the model at the given rank to Production stage.
+
+    Only one model version is in Production at a time: any existing
+    Production version is archived before the new one is promoted.
+    """
     models = get_registered_models(client, registry_name)
 
     if not models:
@@ -133,6 +137,7 @@ def promote_model(client, registry_name, rank):
         logger.error("Invalid rank %d. Available ranks: 1 to %d", rank, len(models))
         return
 
+    # Models list is sorted by val_score descending, so rank 1 is the best
     selected = models[rank - 1]
     version = selected["version"]
     model_name = selected["model_name"]
@@ -171,6 +176,12 @@ def main():
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    """Entry point for the model selector CLI.
+
+    Resolves the MLflow tracking URI (supporting both local paths and remote
+    URIs), builds the registry name from the experiment name, then delegates
+    to list_models() or promote_model() based on the supplied flags.
+    """
     parser = argparse.ArgumentParser(description="AgentML Model Selector")
     parser.add_argument("--list", action="store_true",
                         help="List all registered models with metrics")
@@ -186,21 +197,24 @@ def main():
         parser.print_help()
         return
 
-    # Get config
+    # Load MLflow settings from program.md (CLI flags take precedence)
     config = parse_program_md()
     mlflow_config = config.get("mlflow", {})
     raw_tracking_uri = args.tracking_uri or mlflow_config.get("tracking_uri", "./mlruns")
     if raw_tracking_uri.startswith(("http://", "https://", "databricks", "sqlite", "postgresql", "mysql", "mssql")):
+        # Remote / DB-backed URI — use as-is
         tracking_uri = raw_tracking_uri
     else:
+        # Convert relative local path to an absolute file:// URI
         resolved = os.path.normpath(os.path.join(PROJECT_ROOT, raw_tracking_uri))
         tracking_uri = "file:///" + resolved.replace("\\", "/")
     experiment_name = args.experiment_name or mlflow_config.get(
         "experiment_name", "agentml_experiment"
     )
+    # Registry names follow the convention "agentml-<experiment_name>"
     registry_name = f"agentml-{experiment_name}"
 
-    # Set up MLflow client
+    # Initialise the MLflow client pointing at the resolved tracking server
     mlflow.set_tracking_uri(tracking_uri)
     client = MlflowClient(tracking_uri=tracking_uri)
 
