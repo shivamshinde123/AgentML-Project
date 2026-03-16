@@ -35,8 +35,16 @@ def load_data(path=None):
     if path is None:
         path = os.path.join(PROJECT_ROOT, "processed", "data_splits.pkl")
     """Load preprocessed data splits."""
-    with open(path, "rb") as f:
-        data = pickle.load(f)
+    try:
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Processed data not found at {path}. "
+            "Run prepare.py first to generate the data splits."
+        )
+    except (pickle.UnpicklingError, EOFError) as e:
+        raise RuntimeError(f"Failed to load data splits from {path}: {e}")
     return data
 
 
@@ -209,4 +217,12 @@ def train():
 
 
 if __name__ == "__main__":
-    train()
+    try:
+        train()
+    except KeyboardInterrupt:
+        print("\n[train] Interrupted by user.")
+        import sys
+        sys.exit(1)
+    except Exception as e:
+        print(f"[train] ERROR: {e}")
+        raise
