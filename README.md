@@ -1,8 +1,10 @@
-# AgentML
+ # AgentML
 
 Autonomous ML experimentation loop inspired by [Andrej Karpathy's autoresearch](https://github.com/karpathy/autoresearch). An AI agent iterates on model selection and hyperparameter tuning overnight by modifying a single file (`train.py`), running experiments, checking if the metric improved, committing the change via git if it did, reverting if it did not, and repeating the loop.
 
 All experiment tracking is handled by MLflow. All dependency management uses uv.
+
+![flow-diagram](https://raw.githubusercontent.com/shivamshinde123/AgentML-Project/refs/heads/main/flow.png)
 
 ## Project Structure
 
