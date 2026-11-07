@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentML — an ML researcher that works the night shift</title>
+<meta name="description" content="An autonomous ML experimentation loop: an agent edits one file, trains, keeps the change with a git commit if the metric improves, and reverts it if not.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+/* Design reference: Modal via Refero Styles — a phosphor terminal in a darkened server room.
+   Achromatic black, phosphor-green text, lime used on one element per viewport, 12px buttons, 8px cards, hairline green borders. */
+:root{--void:#000;--iron:#181818;--veil:#212525;--circuit:#485346;--blueblack:#1f2a33;--rust:#231c1c;--lime:#7fee64;--phosphor:#ddffdc;
+  --mint:#def0dd;--sage60:#8cab87;--sage40:#677d64;--moss70:#9cbf93;--moss80:#aed2a4;--fern:#859984;--deep:#697368;--pine:#3e4a3c;--red:#ff7a6b;
+  --display:"Space Grotesk","Inter Tight",sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace}
+*{box-sizing:border-box;margin:0}
+html{color-scheme:dark}
+body{background:var(--void);color:var(--sage60);font:400 17px/1.55 Inter,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+a{color:var(--fern)}a:hover{color:var(--phosphor)}
+:focus-visible{outline:2px solid var(--lime);outline-offset:3px}
+.wrap{max-width:1280px;margin:0 auto;padding:0 24px}
+.eyebrow{font:500 12px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--moss70)}
+h1,h2,h3{font-family:var(--display);font-weight:400;color:var(--phosphor)}
+
+nav.top{position:sticky;top:0;z-index:10;background:rgba(33,37,37,.72);backdrop-filter:blur(14px);border-bottom:1px solid var(--blueblack)}
+nav.top .wrap{height:60px;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:10px;color:var(--phosphor);font:500 18px var(--display);text-decoration:none}
+.logo i{width:12px;height:12px;border-radius:3px;background:var(--lime);box-shadow:0 0 14px rgba(127,238,100,.6)}
+nav.top ul{display:flex;gap:26px;list-style:none;padding:0;font-size:14px}
+nav.top ul a{text-decoration:none;color:var(--fern)}
+
+.btn{display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 20px;border-radius:12px;font:500 15px Inter,sans-serif;text-decoration:none}
+.btn.lime{background:var(--lime);color:#071b05;border-radius:999px}
+.btn.lime:hover{filter:brightness(1.08);color:#071b05}
+.btn.ghost{border:1px solid var(--circuit);color:var(--phosphor)}
+.btn.ghost:hover{background:var(--iron)}
+
+header.hero{padding:110px 0 90px;text-align:center;position:relative;overflow:hidden}
+header.hero::after{content:"";position:absolute;inset:auto 0 0;height:1px;background:linear-gradient(90deg,transparent,var(--circuit),transparent)}
+h1{font-size:clamp(46px,7.4vw,84px);line-height:1;letter-spacing:-.035em;max-width:14ch;margin:20px auto 0}
+.lede{max-width:620px;margin:26px auto 36px;color:var(--moss80);font-size:19px}
+.row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+
+/* terminal */
+.term{background:var(--iron);border:1px solid var(--blueblack);border-radius:8px;overflow:hidden;text-align:left}
+.term .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;background:var(--veil);border-bottom:1px solid var(--blueblack)}
+.term .bar i{width:10px;height:10px;border-radius:50%;background:#3a3f3f}
+.term .bar i:nth-child(1){background:#ff5f57}.term .bar i:nth-child(2){background:#febc2e}.term .bar i:nth-child(3){background:#28c840}
+.term .bar span{margin-left:10px;font:400 12px var(--mono);color:var(--deep)}
+.term pre{padding:20px;font:400 13.5px/1.8 var(--mono);color:var(--sage60);overflow-x:auto;background:var(--rust)}
+.ok{color:var(--lime)}.no{color:var(--red)}.w{color:var(--phosphor)}.d{color:var(--deep)}
+.night{max-width:900px;margin:64px auto 0}
+
+section{padding:100px 0}
+h2{font-size:clamp(34px,4.6vw,56px);line-height:1.05;letter-spacing:-.03em;max-width:18ch;margin:14px 0 18px}
+.sub{max-width:620px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:start}
+
+.rules{list-style:none;padding:0;margin-top:32px;display:grid;gap:0}
+.rules li{display:grid;grid-template-columns:120px 1fr;gap:16px;padding:16px 0;border-top:1px solid var(--blueblack)}
+.rules code{font:400 13px var(--mono);color:var(--phosphor)}
+.rules li span{color:var(--sage60)}
+.lock{color:var(--deep)!important}
+
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:48px}
+.card{background:var(--veil);border:1px solid var(--blueblack);border-radius:8px;padding:32px}
+.card h3{font-size:24px;letter-spacing:-.02em;margin:12px 0 10px}
+.card p{font-size:16px}
+
+.flowimg{max-width:860px;margin-left:auto;margin-right:auto;margin-top:48px;border:1px solid var(--blueblack);border-radius:8px;overflow:hidden;background:#fff}
+.flowimg img{display:block;width:100%;height:auto}
+.flowcap{margin-top:12px;font:400 12px var(--mono);color:var(--deep)}
+
+.yaml{background:var(--iron);border:1px solid var(--blueblack);border-radius:8px;padding:22px;font:400 13.5px/1.8 var(--mono);color:var(--sage60);overflow-x:auto}
+.yaml .k{color:var(--moss80)}.yaml .c{color:var(--sage40)}
+
+.end{text-align:center;padding:120px 0;border-top:1px solid var(--blueblack)}
+.end h2{margin:0 auto 26px}
+footer{border-top:1px solid var(--blueblack);padding:26px 0;font-size:14px;color:var(--deep)}
+footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+@media(max-width:900px){.grid2,.cards{grid-template-columns:1fr}.rules li{grid-template-columns:1fr;gap:4px}nav.top ul li:not(:last-child){display:none}section{padding:80px 0}}
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary"><div class="wrap">
+  <a class="logo" href="#"><i aria-hidden="true"></i>AgentML</a>
+  <ul><li><a href="#loop">The loop</a></li><li><a href="#rules">Rules</a></li><li><a href="#config">Config</a></li><li><a href="https://github.com/shivamshinde123/AgentML-Project">GitHub</a></li></ul>
+</div></nav>
+
+<main>
+<header class="hero"><div class="wrap">
+  <span class="eyebrow">Inspired by Karpathy's autoresearch</span>
+  <h1>An ML researcher that works the night shift.</h1>
+  <p class="lede">Point an AI agent at a CSV and go to sleep. It edits one training file, runs the experiment, keeps the change with a git commit if the metric improved, reverts it if it didn't, and goes again.</p>
+  <div class="row"><a class="btn lime" href="#start">Start a run</a><a class="btn ghost" href="https://github.com/shivamshinde123/AgentML-Project">View on GitHub</a></div>
+
+  <div class="term night" role="img" aria-label="Terminal log of an overnight run: some experiments improve and are committed, others are reverted">
+    <div class="bar"><i></i><i></i><i></i><span>python src/run_experiment.py · overnight</span></div>
+<pre><span class="d">02:14</span>  LogisticRegression          f1_weighted <span class="w">0.8124</span>   <span class="ok">✓ improved → git commit</span>
+<span class="d">02:31</span>  SVC(C=3.0, rbf)             f1_weighted <span class="w">0.8061</span>   <span class="no">✗ no gain → git revert</span>
+<span class="d">02:52</span>  RandomForest(n=400)         f1_weighted <span class="w">0.8437</span>   <span class="ok">✓ improved → git commit</span>
+<span class="d">03:20</span>  XGBoost(depth=6, lr=0.05)   f1_weighted <span class="w">0.8592</span>   <span class="ok">✓ improved → git commit</span>
+<span class="d">03:47</span>  XGBoost(depth=9)            f1_weighted <span class="w">0.8540</span>   <span class="no">✗ no gain → git revert</span>
+<span class="d">04:09</span>  StackingClassifier(rf, xgb) f1_weighted <span class="w">0.8665</span>   <span class="ok">✓ improved → git commit</span>
+<span class="d">============================================================</span>
+  Best Score So Far:  <span class="w">0.866500</span>   Best Model: <span class="w">StackingClassifier</span>
+  Total Experiments:  <span class="w">6</span>          No-improvement streak: <span class="w">0</span></pre>
+  </div>
+  <p class="flowcap" style="text-align:center">Illustrative run. Every experiment is logged to MLflow.</p>
+</div></header>
+
+<section id="loop"><div class="wrap">
+  <span class="eyebrow">The loop</span>
+  <h2>Change one thing. Measure. Keep or undo.</h2>
+  <p class="sub">The orchestrator is fixed; only the agent's edits change. Git is the lab notebook, so the history of <code style="font-family:var(--mono);font-size:14px;color:var(--phosphor)">train.py</code> is a list of things that worked.</p>
+  <div class="cards">
+    <article class="card"><span class="eyebrow">01 · prepare</span><h3>Clean once</h3><p>Duplicates, imputation, encoding, scaling and SMOTE run once into train, validation and test splits. These critical steps can't be skipped.</p></article>
+    <article class="card"><span class="eyebrow">02 · experiment</span><h3>Train and score</h3><p>The agent edits <code style="font-family:var(--mono);font-size:14px">get_model()</code> and the notes string, then runs cross-validated training under a time limit.</p></article>
+    <article class="card"><span class="eyebrow">03 · decide</span><h3>Commit or revert</h3><p>Better than the best score? Commit. Otherwise revert. After 3 misses in a row, it suggests changing preprocessing instead.</p></article>
+  </div>
+  <figure class="flowimg"><img src="https://raw.githubusercontent.com/shivamshinde123/AgentML-Project/main/flow.png" alt="AgentML flow diagram: prepare data, edit train.py, run experiment, compare with best score, commit or revert, repeat" loading="lazy" width="1888" height="1053"></figure>
+</div></section>
+
+<section id="rules" style="background:#060807"><div class="wrap grid2">
+  <div>
+    <span class="eyebrow">Guardrails</span>
+    <h2>One file to change. Everything else is locked.</h2>
+    <p class="sub">The agent prompt is short and strict, so a night of unattended runs stays reviewable in the morning.</p>
+  </div>
+  <ul class="rules">
+    <li><code>src/train.py</code><span>The only file the agent may modify.</span></li>
+    <li><code class="lock">src/prepare.py</code><span>Read only: the preprocessing pipeline.</span></li>
+    <li><code class="lock">run_experiment.py</code><span>Read only: train, log, compare, commit or revert.</span></li>
+    <li><code>best_scores.json</code><span>What has been tried and the current best, read before every move.</span></li>
+    <li><code>uv add</code><span>New packages go through uv. Never pip.</span></li>
+    <li><code>strategy</code><span>Simple models first, then boosting, then voting and stacking ensembles.</span></li>
+  </ul>
+</div></section>
+
+<section id="config"><div class="wrap grid2">
+  <div>
+    <span class="eyebrow">Configure</span>
+    <h2>Describe the task in program.md.</h2>
+    <p class="sub">Dataset, target, metric, preprocessing choices and free-form instructions like "only tree-based models" or "go wild".</p>
+    <p class="sub" style="margin-top:18px">When you're happy, promote the best run from the MLflow registry with <code style="font-family:var(--mono);font-size:14px;color:var(--phosphor)">select_model.py --rank 1</code>.</p>
+  </div>
+  <pre class="yaml" aria-label="Example program.md front matter"><span class="k">dataset:</span>
+  path: data/house_prices.csv
+  target_column: Price (in rupees)
+  task_type: auto          <span class="c"># classification | regression</span>
+<span class="k">metric:</span>
+  primary: auto            <span class="c"># f1_weighted | rmse | r2 …</span>
+<span class="k">preprocessing:</span>
+  imputer: median          <span class="c"># mean | knn | iterative</span>
+  encoder: label_onehot    <span class="c"># ordinal | target</span>
+  scaler: standard         <span class="c"># minmax | robust | maxabs</span>
+<span class="k">mlflow:</span>
+  experiment_name: agentml_experiment
+  top_n_models: 5
+<span class="k">constraints:</span>
+  cv_folds: 10
+  max_training_time: 300   <span class="c"># seconds</span></pre>
+</div></section>
+
+<section id="start" class="end"><div class="wrap">
+  <span class="eyebrow">Start</span>
+  <h2>Drop in a CSV. Wake up to a better model.</h2>
+  <div class="term" style="max-width:640px;margin:0 auto 30px">
+    <div class="bar"><i></i><i></i><i></i><span>terminal</span></div>
+<pre>uv venv && uv sync
+<span class="d"># put your CSV in data/ and fill in program.md</span>
+python src/run_experiment.py
+<span class="d"># then hand the loop to Claude Code or another agent</span></pre>
+  </div>
+  <a class="btn ghost" href="https://github.com/shivamshinde123/AgentML-Project#usage">Read the full guide</a>
+</div></section>
+</main>
+
+<footer><div class="wrap"><span>Built by <a href="https://github.com/shivamshinde123">Shivam Shinde</a></span><span>scikit-learn · XGBoost · MLflow · uv</span></div></footer>
+</body>
+</html>
